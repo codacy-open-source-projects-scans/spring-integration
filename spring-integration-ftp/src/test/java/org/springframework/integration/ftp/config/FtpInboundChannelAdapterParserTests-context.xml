@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:int="http://www.springframework.org/schema/integration"
+	xmlns:int-ftp="http://www.springframework.org/schema/integration/ftp"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans https://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/integration https://www.springframework.org/schema/integration/spring-integration.xsd
+		http://www.springframework.org/schema/integration/ftp https://www.springframework.org/schema/integration/ftp/spring-integration-ftp.xsd">
+
+	<bean id="ftpSessionFactory"
+		class="org.springframework.integration.ftp.config.FtpInboundChannelAdapterParserTests.TestSessionFactoryBean"/>
+
+	<bean id="csf" class="org.springframework.integration.file.remote.session.CachingSessionFactory">
+		<constructor-arg ref="ftpSessionFactory"/>
+	</bean>
+
+	<int-ftp:inbound-channel-adapter id="ftpInbound"
+				channel="ftpChannel"
+				session-factory="ftpSessionFactory"
+				scanner="dirScanner"
+				auto-create-local-directory="true"
+				auto-startup="false"
+				delete-remote-files="true"
+				preserve-timestamp="true"
+				filename-pattern="*.txt"
+				local-directory="."
+				remote-file-separator=""
+				local-filename-generator-expression="#this.toUpperCase() + '.a' + @fooString"
+				comparator="comparator"
+				temporary-file-suffix=".foo"
+				max-fetch-size="42"
+				local-filter="acceptAllFilter"
+				remote-directory-expression="'foo/bar'"
+				remote-file-metadata-store="metadataStore"
+				metadata-store-prefix="testPrefix">
+			<int:poller fixed-rate="1000">
+				<int:transactional synchronization-factory="syncFactory"/>
+			</int:poller>
+	</int-ftp:inbound-channel-adapter>
+
+	<bean id="metadataStore" class="org.springframework.integration.metadata.SimpleMetadataStore"/>
+
+	<bean id="dirScanner" class="org.springframework.integration.file.HeadDirectoryScanner">
+		<constructor-arg value="1" />
+	</bean>
+
+	<bean id="fooString" class="java.lang.String">
+		<constructor-arg value="foo" />
+	</bean>
+
+	<bean id="acceptAllFilter" class="org.springframework.integration.file.filters.AcceptAllFileListFilter" />
+
+	<int:transaction-synchronization-factory id="syncFactory">
+		<int:after-commit expression="'foo'" channel="successChannel"/>
+		<int:after-rollback expression="'bar'" channel="failureChannel"/>
+	</int:transaction-synchronization-factory>
+
+	<int:channel id="successChannel" />
+
+	<int:channel id="failureChannel" />
+
+	<bean id="comparator" class="org.mockito.Mockito" factory-method="mock">
+		<constructor-arg value="java.util.Comparator" type="java.lang.Class"/>
+	</bean>
+
+	<int-ftp:inbound-channel-adapter
+				channel="ftpChannel"
+				session-factory="ftpSessionFactory"
+				auto-create-local-directory="true"
+				delete-remote-files="true"
+				filter="entryListFilter"
+				local-directory="."
+				remote-directory="foo/bar">
+			<int:poller fixed-rate="1000"/>
+	</int-ftp:inbound-channel-adapter>
+
+	<int-ftp:inbound-channel-adapter id="simpleAdapterWithCachedSessions"
+				channel="ftpChannel"
+				session-factory="csf"
+				local-directory="."
+				remote-directory="foo/bar">
+			<int:poller fixed-rate="1000"/>
+	</int-ftp:inbound-channel-adapter>
+
+	<int:channel id="ftpChannel">
+		<int:queue/>
+	</int:channel>
+
+	<bean id="entryListFilter" class="org.mockito.Mockito" factory-method="mock">
+		<constructor-arg value="org.springframework.integration.file.filters.FileListFilter" type="java.lang.Class"/>
+	</bean>
+
+	<int-ftp:inbound-channel-adapter id="autoChannel"
+				session-factory="ftpSessionFactory"
+				local-directory="."
+				remote-directory="foo/bar">
+			<int:poller fixed-rate="1000"/>
+	</int-ftp:inbound-channel-adapter>
+
+	<int:bridge input-channel="autoChannel" output-channel="nullChannel" />
+
+	<bean id="transactionManager" class="org.springframework.integration.transaction.PseudoTransactionManager"/>
+
+</beans>

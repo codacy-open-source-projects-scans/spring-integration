@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	   xmlns:int="http://www.springframework.org/schema/integration"
+	   xmlns:int-redis="http://www.springframework.org/schema/integration/redis"
+	   xmlns:util="http://www.springframework.org/schema/util"
+	   xsi:schemaLocation="http://www.springframework.org/schema/beans https://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/integration https://www.springframework.org/schema/integration/spring-integration.xsd
+		http://www.springframework.org/schema/integration/redis https://www.springframework.org/schema/integration/redis/spring-integration-redis.xsd
+		http://www.springframework.org/schema/util https://www.springframework.org/schema/util/spring-util.xsd">
+
+	<bean id="redisConnectionFactory" class="org.springframework.integration.redis.RedisContainerTest"
+		  factory-method="connectionFactory"/>
+
+	<util:constant id="TEST_QUEUE"
+				   static-field="org.springframework.integration.redis.inbound.RedisQueueMessageDrivenEndpointTests.TEST_QUEUE"/>
+
+	<int:channel id="fromChannel">
+		<int:queue/>
+	</int:channel>
+
+	<int-redis:queue-inbound-channel-adapter id="fromChannelEndpoint" queue="#{TEST_QUEUE}"
+											 channel="fromChannel"
+											 expect-message="true"
+											 auto-startup="false"
+											 receive-timeout="10"
+											 serializer="testSerializer"/>
+
+	<bean id="testSerializer" class="org.springframework.integration.redis.util.CustomJsonSerializer"/>
+
+	<int:chain input-channel="symmetricalInputChannel">
+		<int:payload-serializing-transformer/>
+		<int-redis:queue-outbound-channel-adapter queue-expression="headers.redis_queue"/>
+	</int:chain>
+
+	<int-redis:queue-inbound-channel-adapter id="symmetricalRedisChannelEndpoint" queue="#{TEST_QUEUE}"
+											 channel="symmetricalRedisChannel"
+											 auto-startup="false"
+											 receive-timeout="10"
+											 serializer=""/>
+
+
+	<int:payload-deserializing-transformer input-channel="symmetricalRedisChannel"
+										   output-channel="symmetricalOutputChannel"/>
+
+	<int:channel id="symmetricalOutputChannel">
+		<int:queue/>
+	</int:channel>
+
+</beans>

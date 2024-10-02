@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	   xmlns:int="http://www.springframework.org/schema/integration"
+	   xmlns:int-redis="http://www.springframework.org/schema/integration/redis"
+	   xsi:schemaLocation="http://www.springframework.org/schema/beans https://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/integration https://www.springframework.org/schema/integration/spring-integration.xsd
+		http://www.springframework.org/schema/integration/redis https://www.springframework.org/schema/integration/redis/spring-integration-redis.xsd">
+
+	<bean id="redisConnectionFactory" class="org.mockito.Mockito" factory-method="mock">
+		<constructor-arg value="org.springframework.data.redis.connection.RedisConnectionFactory" type="java.lang.Class"/>
+	</bean>
+
+	<bean id="customRedisConnectionFactory" parent="redisConnectionFactory"/>
+
+	<int:channel id="sendChannel"/>
+
+	<int-redis:queue-outbound-channel-adapter id="defaultAdapter" channel="sendChannel" queue="foo">
+		<int-redis:request-handler-advice-chain>
+			<int:retry-advice/>
+		</int-redis:request-handler-advice-chain>
+	</int-redis:queue-outbound-channel-adapter>
+
+	<int-redis:queue-outbound-channel-adapter id="customAdapter" channel="sendChannel"
+											  queue-expression="headers['redis_queue']"
+											  extract-payload="false"
+											  serializer="serializer"
+											  connection-factory="customRedisConnectionFactory"
+											  left-push="false"/>
+
+	<bean id="serializer" class="org.springframework.data.redis.serializer.StringRedisSerializer"/>
+
+</beans>

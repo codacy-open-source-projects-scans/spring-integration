@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	   xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	   xmlns:int-mongodb="http://www.springframework.org/schema/integration/mongodb"
+	   xsi:schemaLocation="http://www.springframework.org/schema/beans https://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/integration/mongodb https://www.springframework.org/schema/integration/mongodb/spring-integration-mongodb.xsd">
+
+	<bean id="mongoDbFactory" class="org.mockito.Mockito" factory-method="mock">
+		<constructor-arg value="org.springframework.data.mongodb.MongoDatabaseFactory" type="java.lang.Class"/>
+	</bean>
+
+	<int-mongodb:outbound-channel-adapter id="fullConfigWithCollectionExpression"
+										  collection-name-expression="headers.collectionName"
+										  mongo-template="mongoDbTemplate"
+										  mongo-converter="mongoConverter"/>
+
+	<bean id="mongoConverter" class="org.springframework.integration.mongodb.MongoDbContainerTest.TestMongoConverter">
+		<constructor-arg ref="mongoDbFactory"/>
+		<constructor-arg>
+			<bean class="org.springframework.data.mongodb.core.mapping.MongoMappingContext"/>
+		</constructor-arg>
+	</bean>
+
+	<bean id="mongoDbTemplate" class="org.springframework.data.mongodb.core.MongoTemplate">
+		<constructor-arg ref="mongoDbFactory"/>
+	</bean>
+
+</beans>

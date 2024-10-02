@@ -1,0 +1,18 @@
+pluginManagement {
+	repositories {
+		gradlePluginPortal()
+		mavenCentral()
+	}
+}
+
+plugins {
+	id 'io.spring.develocity.conventions' version '0.0.21'
+}
+
+rootProject.name = 'spring-integration'
+
+rootDir.eachDir { dir ->
+	if (dir.name.startsWith('spring-integration-')) {
+		include ":${dir.name}"
+	}
+}

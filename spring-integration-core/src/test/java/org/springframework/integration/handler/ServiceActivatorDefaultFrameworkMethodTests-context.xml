@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans:beans xmlns="http://www.springframework.org/schema/integration"
+			 xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+			 xmlns:beans="http://www.springframework.org/schema/beans"
+			 xmlns:context="http://www.springframework.org/schema/context"
+			 xsi:schemaLocation="http://www.springframework.org/schema/beans
+			https://www.springframework.org/schema/beans/spring-beans.xsd
+			http://www.springframework.org/schema/integration
+			https://www.springframework.org/schema/integration/spring-integration.xsd
+			http://www.springframework.org/schema/context https://www.springframework.org/schema/context/spring-context.xsd">
+
+	<context:annotation-config/>
+
+	<beans:bean class="org.springframework.integration.handler.ServiceActivatorDefaultFrameworkMethodTests$FunctionConfiguration"/>
+
+	<message-history/>
+
+	<service-activator id="gatewayTestService" input-channel="gatewayTestInputChannel" ref="gateway"/>
+
+	<service-activator id="replyingHandlerTestService" input-channel="replyingHandlerTestInputChannel">
+		<beans:bean
+			class="org.springframework.integration.handler.ServiceActivatorDefaultFrameworkMethodTests$TestReplyingMessageHandler"/>
+	</service-activator>
+
+	<service-activator id="optimizedRefReplyingHandlerTestService"
+		input-channel="optimizedRefReplyingHandlerTestInputChannel" ref="testReplyingMessageHandler"/>
+
+	<service-activator id="replyingHandlerWithStandardMethodTestService"
+		 input-channel="replyingHandlerWithStandardMethodTestInputChannel"
+		 method="handleMessage">
+		 <beans:bean id="innerReplyingHandler"
+			class="org.springframework.integration.handler.ServiceActivatorDefaultFrameworkMethodTests$TestReplyingMessageHandler"/>
+	</service-activator>
+
+	<service-activator id="replyingHandlerWithOtherMethodTestService"
+		 input-channel="replyingHandlerWithOtherMethodTestInputChannel"
+		 method="foo">
+		 <beans:bean id="innerReplyingHandlerFoo"
+			class="org.springframework.integration.handler.ServiceActivatorDefaultFrameworkMethodTests$TestReplyingMessageHandler"/>
+	</service-activator>
+
+	<service-activator id="handlerTestService" input-channel="handlerTestInputChannel">
+		<beans:bean id="innerHandler"
+			class="org.springframework.integration.handler.ServiceActivatorDefaultFrameworkMethodTests$TestMessageHandler"/>
+	</service-activator>
+
+	<service-activator id="processorTestService"
+					   input-channel="processorTestInputChannel"
+					   ref="testMessageProcessor"
+					   not-propagated-headers="*"/>
+
+	<gateway id="gateway" default-request-channel="requestChannel" default-reply-channel="replyChannel"/>
+
+	<chain input-channel="requestChannel" output-channel="replyChannel">
+		<transformer expression="payload == 'foo' ? T(org.springframework.integration.handler.ServiceActivatorDefaultFrameworkMethodTests).throwIllegalStateException('Wrong payload') : payload"/>
+	</chain>
+
+	<channel id="replyChannel">
+		<queue/>
+	</channel>
+
+	<beans:bean id="testReplyingMessageHandler"
+		class="org.springframework.integration.handler.ServiceActivatorDefaultFrameworkMethodTests$TestReplyingMessageHandler"/>
+
+	<beans:bean id="testMessageProcessor"
+			class="org.springframework.integration.handler.ServiceActivatorDefaultFrameworkMethodTests$TestMessageProcessor">
+		<beans:property name="prefix" value="foo"/>
+	</beans:bean>
+
+	<channel id="asyncIn" />
+
+	<channel id="asyncOut">
+		<queue />
+	</channel>
+
+	<service-activator input-channel="asyncIn" ref="async" async="true" />
+
+	<beans:bean id="async"
+		class="org.springframework.integration.handler.ServiceActivatorDefaultFrameworkMethodTests$AsyncService" />
+
+	<channel id="errorChannel">
+		<queue />
+	</channel>
+
+	<service-activator input-channel="processorViaFunctionChannel" ref="functionAsService"/>
+
+</beans:beans>
