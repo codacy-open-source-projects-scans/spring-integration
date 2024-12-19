@@ -53,6 +53,7 @@ import org.springframework.integration.kafka.inbound.KafkaMessageSource;
 import org.springframework.integration.kafka.outbound.KafkaProducerMessageHandler;
 import org.springframework.integration.kafka.support.KafkaIntegrationHeaders;
 import org.springframework.integration.support.MessageBuilder;
+import org.springframework.integration.test.condition.LogLevels;
 import org.springframework.integration.test.util.TestUtils;
 import org.springframework.kafka.annotation.EnableKafka;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
@@ -98,6 +99,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringJUnitConfig
 @DirtiesContext
+@LogLevels(level = "debug", categories = "org.apache.kafka.clients.consumer")
 public class KafkaDslTests {
 
 	private static final Log log = LogFactory.getLog(KafkaDslTests.class);
@@ -193,8 +195,6 @@ public class KafkaDslTests {
 			assertThat(headers.get(KafkaHeaders.RECEIVED_KEY)).isEqualTo(i + 1);
 			assertThat(headers.get(KafkaHeaders.RECEIVED_PARTITION)).isEqualTo(0);
 			assertThat(headers.get(KafkaHeaders.OFFSET)).isEqualTo((long) i);
-			assertThat(headers.get(KafkaHeaders.TIMESTAMP_TYPE)).isEqualTo("CREATE_TIME");
-			assertThat(headers.get(KafkaHeaders.RECEIVED_TIMESTAMP)).isEqualTo(1487694048633L);
 			assertThat(headers.get("foo")).isEqualTo("bar");
 		}
 
@@ -211,8 +211,6 @@ public class KafkaDslTests {
 			assertThat(headers.get(KafkaHeaders.RECEIVED_KEY)).isEqualTo(i + 1);
 			assertThat(headers.get(KafkaHeaders.RECEIVED_PARTITION)).isEqualTo(0);
 			assertThat(headers.get(KafkaHeaders.OFFSET)).isEqualTo((long) i);
-			assertThat(headers.get(KafkaHeaders.TIMESTAMP_TYPE)).isEqualTo("CREATE_TIME");
-			assertThat(headers.get(KafkaHeaders.RECEIVED_TIMESTAMP)).isEqualTo(1487694048644L);
 		}
 
 		Message<String> message = MessageBuilder.withPayload("BAR").setHeader(KafkaHeaders.TOPIC, TEST_TOPIC2).build();
@@ -360,8 +358,7 @@ public class KafkaDslTests {
 					.enrichHeaders(h -> h.header(KafkaIntegrationHeaders.FUTURE_TOKEN, "foo"))
 					.publishSubscribeChannel(c -> c
 							.subscribe(sf -> sf.handle(
-									kafkaMessageHandler(producerFactory(), TEST_TOPIC1)
-											.timestampExpression("T(Long).valueOf('1487694048633')"),
+									kafkaMessageHandler(producerFactory(), TEST_TOPIC1),
 									e -> e.id("kafkaProducer1")))
 							.subscribe(sf -> sf.handle(kafkaMessageHandlerTopic2, e -> e.id("kafkaProducer2")))
 					);
@@ -370,8 +367,7 @@ public class KafkaDslTests {
 		@Bean
 		public KafkaProducerMessageHandlerSpec<Integer, String, ?> kafkaMessageHandlerTopic2() {
 			return kafkaMessageHandler(producerFactory(), TEST_TOPIC2)
-					.flush(msg -> true)
-					.timestamp(m -> 1487694048644L);
+					.flush(msg -> true);
 		}
 
 		private KafkaProducerMessageHandlerSpec<Integer, String, ?> kafkaMessageHandler(

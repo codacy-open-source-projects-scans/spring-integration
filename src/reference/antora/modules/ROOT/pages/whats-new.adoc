@@ -16,6 +16,9 @@ In general the project has been moved to the latest dependency versions.
 [[x6.4-new-components]]
 === New Components
 
+A `BaseMessageBuilder` class has been extracted from the `MessageBuilder` to simplify a custom builder implementation where the most of the logic should be the same as `MessageBuilder` one.
+See xref:message.adoc#message-builder[`MessageBuilder`] for more information.
+
 The new Control Bus interaction model is implemented in the `ControlBusCommandRegistry`.
 A new `ControlBusFactoryBean` class is recommended to be used instead of deprecated `ExpressionControlBusFactoryBean`.
 See xref:control-bus.adoc[Control Bus] for more information.
@@ -94,3 +97,9 @@ See xref:zip.adoc[Zip Support] for more information.
 
 The Python scripts evaluation is now migrated to the GraalVM Polyglot.
 See xref:scripting.adoc[Scripting Support] for more information.
+
+[[x6.4-mail-changes]]
+=== Mail Changes
+
+The `AbstractMailReceiver` exposes an option to disable setting `Flags.Flag.FLAGGED` into a received message as fallback flag.
+See xref:mail.adoc[Mail Support] for more information.
