@@ -1,0 +1,404 @@
+/*
+ * Copyright 2018-present the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.springframework.integration.kafka.inbound;
+
+import java.lang.reflect.Type;
+import java.time.Duration;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
+import org.apache.kafka.clients.consumer.Consumer;
+import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.junit.jupiter.api.Test;
+
+import org.springframework.beans.factory.BeanFactory;
+import org.springframework.core.retry.RetryListener;
+import org.springframework.core.retry.RetryPolicy;
+import org.springframework.core.retry.RetryTemplate;
+import org.springframework.core.retry.Retryable;
+import org.springframework.integration.IntegrationMessageHeaderAccessor;
+import org.springframework.integration.channel.DirectChannel;
+import org.springframework.integration.channel.QueueChannel;
+import org.springframework.integration.handler.advice.ErrorMessageSendingRecoverer;
+import org.springframework.integration.kafka.support.RawRecordHeaderErrorMessageStrategy;
+import org.springframework.integration.support.MessageBuilder;
+import org.springframework.kafka.core.ConsumerFactory;
+import org.springframework.kafka.core.DefaultKafkaConsumerFactory;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.kafka.core.ProducerFactory;
+import org.springframework.kafka.event.ConsumerPausedEvent;
+import org.springframework.kafka.event.ConsumerResumedEvent;
+import org.springframework.kafka.listener.ContainerProperties;
+import org.springframework.kafka.listener.KafkaMessageListenerContainer;
+import org.springframework.kafka.support.KafkaHeaders;
+import org.springframework.kafka.support.converter.MessagingMessageConverter;
+import org.springframework.kafka.test.EmbeddedKafkaBroker;
+import org.springframework.kafka.test.context.EmbeddedKafka;
+import org.springframework.kafka.test.utils.ContainerTestUtils;
+import org.springframework.kafka.test.utils.KafkaTestUtils;
+import org.springframework.messaging.Message;
+import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.MessageHeaders;
+import org.springframework.messaging.MessagingException;
+import org.springframework.messaging.support.ErrorMessage;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
+import static org.springframework.kafka.test.assertj.KafkaConditions.partition;
+import static org.springframework.kafka.test.assertj.KafkaConditions.value;
+
+/**
+ *
+ * @author Gary Russell
+ * @author Artem Bilan
+ * @author Urs Keller
+ *
+ * @since 5.4
+ *
+ */
+@EmbeddedKafka(controlledShutdown = true,
+		topics = {InboundGatewayTests.topic1,
+				InboundGatewayTests.topic2,
+				InboundGatewayTests.topic3,
+				InboundGatewayTests.topic4,
+				InboundGatewayTests.topic5,
+				InboundGatewayTests.topic6,
+				InboundGatewayTests.topic7})
+class InboundGatewayTests {
+
+	static final String topic1 = "testTopic1";
+
+	static final String topic2 = "testTopic2";
+
+	static final String topic3 = "testTopic3";
+
+	static final String topic4 = "testTopic4";
+
+	static final String topic5 = "testTopic5";
+
+	static final String topic6 = "testTopic6";
+
+	static final String topic7 = "testTopic7";
+
+	@Test
+	void testInbound(EmbeddedKafkaBroker embeddedKafka) throws Exception {
+		Map<String, Object> consumerProps =
+				KafkaTestUtils.consumerProps(embeddedKafka, "replyHandler1", false);
+		consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+		ConsumerFactory<Integer, String> cf2 = new DefaultKafkaConsumerFactory<>(consumerProps);
+		Consumer<Integer, String> consumer = cf2.createConsumer();
+		embeddedKafka.consumeFromAnEmbeddedTopic(consumer, topic2);
+
+		Map<String, Object> props = KafkaTestUtils.consumerProps(embeddedKafka, "test1", false);
+		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+		DefaultKafkaConsumerFactory<Integer, String> cf = new DefaultKafkaConsumerFactory<>(props);
+		ContainerProperties containerProps = new ContainerProperties(topic1);
+		containerProps.setIdleEventInterval(100L);
+		containerProps.setPollTimeout(200L);
+		KafkaMessageListenerContainer<Integer, String> container =
+				new KafkaMessageListenerContainer<>(cf, containerProps);
+		CountDownLatch pausedLatch = new CountDownLatch(1);
+		CountDownLatch resumedLatch = new CountDownLatch(1);
+		container.setApplicationEventPublisher(event -> {
+			if (event instanceof ConsumerPausedEvent) {
+				pausedLatch.countDown();
+			}
+			else if (event instanceof ConsumerResumedEvent) {
+				resumedLatch.countDown();
+			}
+		});
+		Map<String, Object> senderProps = KafkaTestUtils.producerProps(embeddedKafka);
+		ProducerFactory<Integer, String> pf = new DefaultKafkaProducerFactory<>(senderProps);
+		KafkaTemplate<Integer, String> template = new KafkaTemplate<>(pf);
+		template.setDefaultTopic(topic1);
+		KafkaInboundGateway<Integer, String, String> gateway = new KafkaInboundGateway<>(container, template);
+		QueueChannel out = new QueueChannel();
+		DirectChannel reply = new DirectChannel();
+		gateway.setRequestChannel(out);
+		gateway.setReplyChannel(reply);
+		gateway.setBeanFactory(mock(BeanFactory.class));
+		gateway.setReplyTimeout(30_000);
+		gateway.afterPropertiesSet();
+		gateway.setMessageConverter(new MessagingMessageConverter() {
+
+			@Override
+			public Message<?> toMessage(ConsumerRecord<?, ?> record, Object acknowledgment, Object con, Type type) {
+				Message<?> message = super.toMessage(record, acknowledgment, con, type);
+				return MessageBuilder.fromMessage(message)
+						.setHeader("testHeader", "testValue")
+						.setHeader(KafkaHeaders.REPLY_TOPIC, topic2)
+						.setHeader(KafkaHeaders.REPLY_PARTITION, 1)
+						.build();
+			}
+
+		});
+
+		CountDownLatch onPartitionsAssignedCalledLatch = new CountDownLatch(1);
+
+		gateway.setOnPartitionsAssignedSeekCallback((map, seekConsumer) -> onPartitionsAssignedCalledLatch.countDown());
+
+		gateway.start();
+		ContainerTestUtils.waitForAssignment(container, 2);
+
+		template.sendDefault(0, 1487694048607L, 1, "foo");
+		Message<?> received = out.receive(30_000);
+		assertThat(received).isNotNull();
+
+		MessageHeaders headers = received.getHeaders();
+		assertThat(headers)
+				.containsEntry(KafkaHeaders.RECEIVED_KEY, 1)
+				.containsEntry(KafkaHeaders.RECEIVED_TOPIC, topic1)
+				.containsEntry(KafkaHeaders.RECEIVED_PARTITION, 0)
+				.containsEntry(KafkaHeaders.OFFSET, 0L)
+				.containsEntry(KafkaHeaders.RECEIVED_TIMESTAMP, 1487694048607L)
+				.containsEntry(KafkaHeaders.TIMESTAMP_TYPE, "CREATE_TIME")
+				.containsEntry(KafkaHeaders.REPLY_TOPIC, topic2)
+				.containsEntry("testHeader", "testValue");
+
+		reply.send(MessageBuilder.withPayload("FOO").copyHeaders(headers).build());
+
+		ConsumerRecord<Integer, String> record = KafkaTestUtils.getSingleRecord(consumer, topic2);
+		assertThat(record).has(partition(1));
+		assertThat(record).has(value("FOO"));
+		assertThat(onPartitionsAssignedCalledLatch.await(10, TimeUnit.SECONDS)).isTrue();
+		gateway.pause();
+		assertThat(pausedLatch.await(10, TimeUnit.SECONDS)).isTrue();
+		assertThat(gateway.isPaused()).isTrue();
+		gateway.resume();
+		assertThat(resumedLatch.await(10, TimeUnit.SECONDS)).isTrue();
+		assertThat(gateway.isPaused()).isFalse();
+
+		gateway.stop();
+		consumer.close();
+		pf.reset();
+	}
+
+	@Test
+	void testInboundErrorRecover(EmbeddedKafkaBroker embeddedKafka) {
+		Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(embeddedKafka, "replyHandler2", false);
+		consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+		ConsumerFactory<Integer, String> cf2 = new DefaultKafkaConsumerFactory<>(consumerProps);
+		Consumer<Integer, String> consumer = cf2.createConsumer();
+		embeddedKafka.consumeFromAnEmbeddedTopic(consumer, topic4);
+
+		Map<String, Object> props = KafkaTestUtils.consumerProps(embeddedKafka, "test2", false);
+		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+		DefaultKafkaConsumerFactory<Integer, String> cf = new DefaultKafkaConsumerFactory<>(props);
+		ContainerProperties containerProps = new ContainerProperties(topic3);
+		KafkaMessageListenerContainer<Integer, String> container =
+				new KafkaMessageListenerContainer<>(cf, containerProps);
+		Map<String, Object> senderProps = KafkaTestUtils.producerProps(embeddedKafka);
+		ProducerFactory<Integer, String> pf = new DefaultKafkaProducerFactory<>(senderProps);
+		KafkaTemplate<Integer, String> template = new KafkaTemplate<>(pf);
+		template.setDefaultTopic(topic3);
+		KafkaInboundGateway<Integer, String, String> gateway = new KafkaInboundGateway<>(container, template);
+		MessageChannel out = new DirectChannel() {
+
+			@Override
+			protected boolean doSend(Message<?> message, long timeout) {
+				throw new RuntimeException("intended");
+			}
+
+		};
+		QueueChannel errors = new QueueChannel();
+		gateway.setRequestChannel(out);
+		gateway.setErrorChannel(errors);
+		gateway.setBeanFactory(mock(BeanFactory.class));
+		gateway.setMessageConverter(new MessagingMessageConverter() {
+
+			@Override
+			public Message<?> toMessage(ConsumerRecord<?, ?> record, Object acknowledgment, Object con, Type type) {
+				Message<?> message = super.toMessage(record, acknowledgment, con, type);
+				return MessageBuilder.fromMessage(message)
+						.setHeader("testHeader", "testValue")
+						.setHeader(KafkaHeaders.REPLY_TOPIC, topic4)
+						.setHeader(KafkaHeaders.REPLY_PARTITION, 1)
+						.build();
+			}
+
+		});
+		gateway.setReplyTimeout(30_000);
+		gateway.setBindSourceRecord(true);
+		gateway.afterPropertiesSet();
+		gateway.start();
+		ContainerTestUtils.waitForAssignment(container, 2);
+
+		template.sendDefault(0, 1487694048607L, 1, "foo");
+		ErrorMessage em = (ErrorMessage) errors.receive(30_000);
+		assertThat(em).isNotNull();
+		assertThat(em.getHeaders().get(KafkaHeaders.RAW_DATA)).isNotNull();
+		Message<?> failed = ((MessagingException) em.getPayload()).getFailedMessage();
+		assertThat(failed).isNotNull();
+		assertThat(failed.getHeaders().get(IntegrationMessageHeaderAccessor.SOURCE_DATA))
+				.isSameAs(em.getHeaders().get(KafkaHeaders.RAW_DATA));
+		MessageChannel reply = (MessageChannel) em.getHeaders().getReplyChannel();
+		MessageHeaders headers = failed.getHeaders();
+		reply.send(MessageBuilder.withPayload("ERROR").copyHeaders(headers).build());
+
+		assertThat(headers)
+				.containsEntry(KafkaHeaders.RECEIVED_KEY, 1)
+				.containsEntry(KafkaHeaders.RECEIVED_TOPIC, topic3)
+				.containsEntry(KafkaHeaders.RECEIVED_PARTITION, 0)
+				.containsEntry(KafkaHeaders.OFFSET, 0L)
+				.containsEntry(KafkaHeaders.RECEIVED_TIMESTAMP, 1487694048607L)
+				.containsEntry(KafkaHeaders.TIMESTAMP_TYPE, "CREATE_TIME")
+				.containsEntry(KafkaHeaders.REPLY_TOPIC, topic4)
+				.containsEntry("testHeader", "testValue");
+
+		ConsumerRecord<Integer, String> record = KafkaTestUtils.getSingleRecord(consumer, topic4);
+		assertThat(record).has(partition(1));
+		assertThat(record).has(value("ERROR"));
+
+		gateway.stop();
+		consumer.close();
+		pf.reset();
+	}
+
+	@Test
+	void testInboundRetryErrorRecover(EmbeddedKafkaBroker embeddedKafka) {
+		Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(embeddedKafka, "replyHandler3", false);
+		consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+		ConsumerFactory<Integer, String> cf2 = new DefaultKafkaConsumerFactory<>(consumerProps);
+		Consumer<Integer, String> consumer = cf2.createConsumer();
+		embeddedKafka.consumeFromAnEmbeddedTopic(consumer, topic6);
+
+		Map<String, Object> props = KafkaTestUtils.consumerProps(embeddedKafka, "test3", false);
+		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+		DefaultKafkaConsumerFactory<Integer, String> cf = new DefaultKafkaConsumerFactory<>(props);
+		ContainerProperties containerProps = new ContainerProperties(topic5);
+		KafkaMessageListenerContainer<Integer, String> container =
+				new KafkaMessageListenerContainer<>(cf, containerProps);
+		Map<String, Object> senderProps = KafkaTestUtils.producerProps(embeddedKafka);
+		ProducerFactory<Integer, String> pf = new DefaultKafkaProducerFactory<>(senderProps);
+		KafkaTemplate<Integer, String> template = new KafkaTemplate<>(pf);
+		template.setDefaultTopic(topic5);
+		KafkaInboundGateway<Integer, String, String> gateway = new KafkaInboundGateway<>(container, template);
+		MessageChannel out = new DirectChannel() {
+
+			@Override
+			protected boolean doSend(Message<?> message, long timeout) {
+				throw new RuntimeException("intended");
+			}
+
+		};
+		QueueChannel errors = new QueueChannel();
+		gateway.setRequestChannel(out);
+		gateway.setErrorChannel(errors);
+		gateway.setBeanFactory(mock(BeanFactory.class));
+		gateway.setMessageConverter(new MessagingMessageConverter() {
+
+			@Override
+			public Message<?> toMessage(ConsumerRecord<?, ?> record, Object acknowledgment, Object con, Type type) {
+				Message<?> message = super.toMessage(record, acknowledgment, con, type);
+				return MessageBuilder.fromMessage(message)
+						.setHeader("testHeader", "testValue")
+						.setHeader(KafkaHeaders.REPLY_TOPIC, topic6)
+						.setHeader(KafkaHeaders.REPLY_PARTITION, 1)
+						.build();
+			}
+
+		});
+		gateway.setReplyTimeout(30_000);
+		gateway.setRetryTemplate(new RetryTemplate(RetryPolicy.builder().maxAttempts(2).delay(Duration.ZERO).build()));
+		gateway.setRecoveryCallback(
+				new ErrorMessageSendingRecoverer(errors, new RawRecordHeaderErrorMessageStrategy()));
+		gateway.afterPropertiesSet();
+		gateway.start();
+		ContainerTestUtils.waitForAssignment(container, 2);
+
+		template.sendDefault(0, 1487694048607L, 1, "foo");
+		ErrorMessage em = (ErrorMessage) errors.receive(30_000);
+		assertThat(em).isNotNull();
+		Message<?> failed = ((MessagingException) em.getPayload()).getFailedMessage();
+		assertThat(failed).isNotNull();
+		assertThat(failed.getHeaders().get(IntegrationMessageHeaderAccessor.SOURCE_DATA)).isNull();
+		MessageChannel reply = (MessageChannel) em.getHeaders().getReplyChannel();
+		MessageHeaders headers = failed.getHeaders();
+		reply.send(MessageBuilder.withPayload("ERROR").copyHeaders(headers).build());
+
+		assertThat(headers)
+				.containsEntry(KafkaHeaders.RECEIVED_KEY, 1)
+				.containsEntry(KafkaHeaders.RECEIVED_TOPIC, topic5)
+				.containsEntry(KafkaHeaders.RECEIVED_PARTITION, 0)
+				.containsEntry(KafkaHeaders.OFFSET, 0L)
+				.containsEntry(KafkaHeaders.RECEIVED_TIMESTAMP, 1487694048607L)
+				.containsEntry(KafkaHeaders.TIMESTAMP_TYPE, "CREATE_TIME")
+				.containsEntry(KafkaHeaders.REPLY_TOPIC, topic6)
+				.containsEntry("testHeader", "testValue");
+
+		ConsumerRecord<Integer, String> record = KafkaTestUtils.getSingleRecord(consumer, topic6);
+		assertThat(record).has(partition(1));
+		assertThat(record).has(value("ERROR"));
+
+		gateway.stop();
+		consumer.close();
+		pf.reset();
+	}
+
+	@Test
+	void testInboundRetryErrorRecoverWithoutRecoveryCallback(EmbeddedKafkaBroker embeddedKafka) throws Exception {
+		Map<String, Object> consumerProps = KafkaTestUtils.consumerProps(embeddedKafka, "replyHandler4", false);
+		consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+		ConsumerFactory<Integer, String> cf2 = new DefaultKafkaConsumerFactory<>(consumerProps);
+		Consumer<Integer, String> consumer = cf2.createConsumer();
+		embeddedKafka.consumeFromAnEmbeddedTopic(consumer, topic7);
+
+		Map<String, Object> props = KafkaTestUtils.consumerProps(embeddedKafka, "test4", false);
+		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+		DefaultKafkaConsumerFactory<Integer, String> cf = new DefaultKafkaConsumerFactory<>(props);
+		ContainerProperties containerProps = new ContainerProperties(topic7);
+		KafkaMessageListenerContainer<Integer, String> container =
+				new KafkaMessageListenerContainer<>(cf, containerProps);
+		Map<String, Object> senderProps = KafkaTestUtils.producerProps(embeddedKafka);
+		ProducerFactory<Integer, String> pf = new DefaultKafkaProducerFactory<>(senderProps);
+		KafkaTemplate<Integer, String> template = new KafkaTemplate<>(pf);
+		template.setDefaultTopic(topic7);
+		KafkaInboundGateway<Integer, String, String> gateway = new KafkaInboundGateway<>(container, template);
+		MessageChannel out =
+				(message, timeout) -> {
+					throw new RuntimeException("intended");
+				};
+		gateway.setRequestChannel(out);
+		gateway.setBeanFactory(mock(BeanFactory.class));
+		gateway.setReplyTimeout(30_000);
+		RetryTemplate retryTemplate = new RetryTemplate(RetryPolicy.builder().maxAttempts(4).delay(Duration.ZERO).build());
+		final CountDownLatch retryCountLatch = new CountDownLatch(4);
+		retryTemplate.setRetryListener(new RetryListener() {
+
+			@Override
+			public void onRetryFailure(RetryPolicy retryPolicy, Retryable<?> retryable, Throwable throwable) {
+				retryCountLatch.countDown();
+			}
+		});
+		gateway.setRetryTemplate(retryTemplate);
+		gateway.afterPropertiesSet();
+		gateway.start();
+		ContainerTestUtils.waitForAssignment(container, 2);
+
+		template.sendDefault(0, 1487694048607L, 1, "foo");
+
+		assertThat(retryCountLatch.await(10, TimeUnit.SECONDS)).isTrue();
+
+		gateway.stop();
+		consumer.close();
+		pf.reset();
+	}
+
+}

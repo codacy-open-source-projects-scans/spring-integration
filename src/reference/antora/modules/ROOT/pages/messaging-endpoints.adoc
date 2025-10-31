@@ -1,0 +1,3 @@
+[[messaging-endpoints-chapter]]
+= Messaging Endpoints
+:page-section-summary-toc: 1

@@ -1,0 +1,6 @@
+[[ftp-max-fetch]]
+= Inbound Channel Adapters: Controlling Remote File Fetching
+
+See xref:sftp/max-fetch.adoc[SFTP: Controlling Remote File Fetching] for exactly the same generic functionality.
+
+Also see general xref:ftp/inbound.adoc[FTP Inbound Channel Adapter] chapter for information about `FileListFilter` configuration.

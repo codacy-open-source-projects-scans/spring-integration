@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:int="http://www.springframework.org/schema/integration"
+	xsi:schemaLocation="http://www.springframework.org/schema/beans https://www.springframework.org/schema/beans/spring-beans.xsd
+		http://www.springframework.org/schema/integration https://www.springframework.org/schema/integration/spring-integration.xsd">
+
+	<int:channel id="errorChannel">
+		<int:queue/>
+	</int:channel>
+
+	<int:gateway id="sampleGateway"
+			service-interface="org.springframework.integration.gateway.GatewayInterfaceTests$Bar"
+			default-request-channel="requestChannelBaz"
+			error-channel="errorChannel">
+		<int:default-header name="name" expression="method.name"/>
+		<int:default-header name="string" expression="method.toString()"/>
+		<int:default-header name="object" expression="method"/>
+		<int:method name="baz">
+			<int:header name="name" value="overrideGlobal"/>
+		</int:method>
+	</int:gateway>
+
+	<int:chain input-channel="lateReplyChannel" >
+		<int:header-enricher>
+			<int:error-channel ref="errorChannel" overwrite="true"/>
+		</int:header-enricher>
+		<int:delayer id="delayer" default-delay="1000"/>
+	</int:chain>
+
+
+	<int:channel id="requestChannelFoo"/>
+	<int:channel id="requestChannelBar"/>
+	<int:channel id="requestChannelBaz"/>
+
+	<int:gateway id="customMappedGateway"
+			service-interface="org.springframework.integration.gateway.GatewayInterfaceTests$Baz"
+			default-request-channel="requestChannelBaz" mapper="mapper"/>
+
+	<bean id="mapper" class="org.springframework.integration.gateway.GatewayInterfaceTests$BazMapper"/>
+
+	<int:gateway id="sampleGateway2"
+				 service-interface="org.springframework.integration.gateway.GatewayInterfaceTests$NoArgumentsGateway"
+				 default-request-channel="requestChannelBar"
+				 default-payload-expression="'foo'"/>
+
+</beans>

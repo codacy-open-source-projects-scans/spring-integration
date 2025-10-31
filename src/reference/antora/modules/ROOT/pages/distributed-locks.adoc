@@ -1,0 +1,59 @@
+[[distributed-locks]]
+= Distributed Locks
+
+In many situations the action against some context (or even single message) has to be performed in an exclusive manner.
+One example is an aggregator component where we have to check the message group state for the current message to determine whether we can release the group or just add that message for future consideration.
+For this purpose Java provides an API with `java.util.concurrent.locks.Lock` implementations.
+However, the problem becomes more complex when an application is distributed and/or run in the cluster.
+The locking in this case is challenging and requires some shared state and its specific approach to achieve the exclusivity requirement.
+
+Spring Integration provides a `LockRegistry` abstraction with an in-memory `DefaultLockRegistry` implementation based on the `ReentrantLock` API.
+The `obtain(Object)` method of the `LockRegistry` requires a `lock key` for specific context.
+For example, an aggregator uses a `correlationKey` to lock operations around its group.
+This way different locks can be used concurrently.
+This `obtain(Object)` method returns a `java.util.concurrent.locks.Lock` instance (depending on the `LockRegistry` implementation), therefore, the rest of the logic is the same as standard Java Concurrency algorithm.
+
+Starting with version 6.2, the `LockRegistry` provides an `executeLocked()` API (`default` methods in this interface) to perform some task while locked.
+The behavior of this API is similar to well-known `JdbcTemplate`, `JmsTemplate` or `RestTemplate`.
+The following example demonstrates the usage of this API:
+
+[source,java]
+----
+LockRegistry registry = new DefaultLockRegistry();
+...
+registry.executeLocked("someLockKey", () -> someExclusiveResourceCall());
+----
+
+The method rethrows an exception from the task call, throws an `InterruptedException` if `Lock` is interrupted.
+In addition, a variant with `Duration` throws a `java.util.concurrent.TimeoutException` when `lock.tryLock()` returns `false`.
+
+Spring Integration provides these `LockRegistry` implementations for distributed locks:
+
+* xref:jdbc/lock-registry.adoc[JDBC]
+* xref:redis.adoc#redis-lock-registry[Redis]
+* xref:zookeeper.adoc#zk-lock-registry[Zookeeper]
+
+The https://awspring.io[Spring Cloud AWS] also provides a `DynamoDbLockRegistry`.
+
+Starting with version 7.0, the `DistributedLock` interface has been introduced, providing new methods, `lock(Duration ttl`) and `tryLock(long time, TimeUnit unit, Duration ttl)`, to acquire a lock with a custom time-to-live (TTL).
+Both `JdbcLock` and `RedisLock` implement `DistributedLock` interface to support the feature of customized time-to-live.
+The `LockRegistry<L extends Lock>` is now a generic interface for types that extend `Lock`.
+The `RenewableLockRegistry` interface now provides new `renewLock(Object lockKey, Duration ttl)` method, allowing you to renew the lock with a custom time-to-live value.
+Both `JdbcLockRegistry` and `RedisLockRegistry` implement `LockRegistry` and `RenewableLockRegistry` interfaces with the type parameter `DistributedLock`.
+
+Below is an example of how to obtain a `DistributedLock` from a registry and acquire it with a specific time-to-live value:
+[source,java]
+----
+DistributedLock lock = registry.obtain("foo");
+Duration timeToLive = Duration.ofMillis(500);
+
+if(lock.tryLock(100, TimeUnit.MILLISECONDS, timeToLive)){
+    try {
+        // do something
+    } catch (Exception e) {
+        // handle exception
+    } finally{
+        lock. unlock();
+    }
+}
+----

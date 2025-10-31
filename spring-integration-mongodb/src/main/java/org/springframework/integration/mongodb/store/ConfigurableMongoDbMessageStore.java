@@ -1,0 +1,331 @@
+/*
+ * Copyright 2013-present the original author or authors.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      https://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.springframework.integration.mongodb.store;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
+
+import org.jspecify.annotations.Nullable;
+
+import org.springframework.data.domain.Sort;
+import org.springframework.data.mongodb.MongoDatabaseFactory;
+import org.springframework.data.mongodb.core.FindAndModifyOptions;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
+import org.springframework.integration.store.MessageGroup;
+import org.springframework.integration.store.MessageStore;
+import org.springframework.integration.store.SimpleMessageGroup;
+import org.springframework.jmx.export.annotation.ManagedAttribute;
+import org.springframework.messaging.Message;
+import org.springframework.util.Assert;
+
+/**
+ * An alternate MongoDB {@link MessageStore} and
+ * {@link org.springframework.integration.store.MessageGroupStore} which allows the user to
+ * configure the instance of {@link MongoTemplate}. The mechanism of storing the messages/group of messages
+ * in the store is and is different from {@link MongoDbMessageStore}. Since the store uses serialization of the
+ * messages by default, all the headers, and the payload of the Message must implement {@link java.io.Serializable}
+ * interface
+ *
+ * @author Amol Nayak
+ * @author Artem Bilan
+ * @author Gary Russell
+ * @author Ngoc Nhan
+ * @author Youbin Wu
+ *
+ * @since 3.0
+ */
+public class ConfigurableMongoDbMessageStore extends AbstractConfigurableMongoDbMessageStore
+		implements MessageStore {
+
+	public static final String DEFAULT_COLLECTION_NAME = "configurableStoreMessages";
+
+	public ConfigurableMongoDbMessageStore(MongoTemplate mongoTemplate) {
+		this(mongoTemplate, DEFAULT_COLLECTION_NAME);
+	}
+
+	public ConfigurableMongoDbMessageStore(MongoTemplate mongoTemplate, String collectionName) {
+		super(mongoTemplate, collectionName);
+	}
+
+	public ConfigurableMongoDbMessageStore(MongoDatabaseFactory mongoDbFactory) {
+		this(mongoDbFactory, null, DEFAULT_COLLECTION_NAME);
+	}
+
+	public ConfigurableMongoDbMessageStore(MongoDatabaseFactory mongoDbFactory,
+			MappingMongoConverter mappingMongoConverter) {
+
+		this(mongoDbFactory, mappingMongoConverter, DEFAULT_COLLECTION_NAME);
+	}
+
+	public ConfigurableMongoDbMessageStore(MongoDatabaseFactory mongoDbFactory, String collectionName) {
+		this(mongoDbFactory, null, collectionName);
+	}
+
+	public ConfigurableMongoDbMessageStore(MongoDatabaseFactory mongoDbFactory,
+			@Nullable MappingMongoConverter mappingMongoConverter, String collectionName) {
+
+		super(mongoDbFactory, mappingMongoConverter, collectionName);
+	}
+
+	@Override
+	public <T> Message<T> addMessage(Message<T> message) {
+		this.addMessageDocument(new MessageDocument(message));
+		return message;
+	}
+
+	@Override
+	public @Nullable Message<?> removeMessage(UUID id) {
+		Query query = Query.query(Criteria.where(MessageDocumentFields.MESSAGE_ID).is(id)
+				.and(MessageDocumentFields.GROUP_ID).exists(false));
+		MessageDocument document = getMongoTemplate().findAndRemove(query, MessageDocument.class, this.collectionName);
+		return (document != null) ? document.getMessage() : null;
+	}
+
+	@Override
+	public long getMessageCount() {
+		Query query = Query.query(Criteria.where(MessageDocumentFields.MESSAGE_ID).exists(true)
+				.and(MessageDocumentFields.GROUP_ID).exists(false));
+		return getMongoTemplate().getCollection(this.collectionName).countDocuments(query.getQueryObject());
+	}
+
+	@Override
+	public MessageGroup getMessageGroup(Object groupId) {
+		Query query = groupOrderQuery(groupId);
+		MessageDocument messageDocument = getMongoTemplate().findOne(query, MessageDocument.class, this.collectionName);
+
+		if (messageDocument != null) {
+			long createdTime = messageDocument.getGroupCreatedTime();
+			long lastModifiedTime = messageDocument.getLastModifiedTime();
+			boolean complete = messageDocument.isComplete();
+			int lastReleasedSequence = messageDocument.getLastReleasedSequence();
+
+			MessageGroup messageGroup = getMessageGroupFactory()
+					.create(this, groupId, createdTime, complete);
+			messageGroup.setLastModified(lastModifiedTime);
+			messageGroup.setLastReleasedMessageSequenceNumber(lastReleasedSequence);
+			messageGroup.setCondition(messageDocument.getCondition());
+			return messageGroup;
+		}
+		else {
+			return new SimpleMessageGroup(groupId);
+		}
+	}
+
+	@Override
+	public MessageGroup addMessageToGroup(Object groupId, Message<?> message) {
+		addMessagesToGroup(groupId, message);
+		return getMessageGroup(groupId);
+	}
+
+	@Override
+	protected void doAddMessagesToGroup(Object groupId, Message<?>... messages) {
+		Query query = groupOrderQuery(groupId);
+		MessageDocument messageDocument = getMongoTemplate().findOne(query, MessageDocument.class, this.collectionName);
+
+		long createdTime = System.currentTimeMillis();
+		int lastReleasedSequence = 0;
+		boolean complete = false;
+
+		String condition = null;
+
+		if (messageDocument != null) {
+			createdTime = messageDocument.getGroupCreatedTime();
+			lastReleasedSequence = messageDocument.getLastReleasedSequence();
+			complete = messageDocument.isComplete();
+			condition = messageDocument.getCondition();
+		}
+
+		for (Message<?> message : messages) {
+			MessageDocument document = new MessageDocument(message);
+			document.setGroupId(groupId);
+			document.setComplete(complete);
+			document.setLastReleasedSequence(lastReleasedSequence);
+			document.setGroupCreatedTime(createdTime);
+			document.setLastModifiedTime(messageDocument == null ? createdTime : System.currentTimeMillis());
+			document.setSequence(getNextId());
+			if (condition != null) {
+				document.setCondition(condition);
+			}
+			addMessageDocument(document);
+		}
+	}
+
+	@Override
+	protected void doRemoveMessagesFromGroup(Object groupId, Collection<Message<?>> messages) {
+		Collection<UUID> ids = new ArrayList<>();
+		for (Message<?> messageToRemove : messages) {
+			ids.add(Objects.requireNonNull(messageToRemove.getHeaders().getId()));
+			if (ids.size() >= getRemoveBatchSize()) {
+				removeMessages(groupId, ids);
+				ids.clear();
+			}
+		}
+		if (!ids.isEmpty()) {
+			removeMessages(groupId, ids);
+		}
+		updateGroup(groupId, lastModifiedUpdate());
+	}
+
+	@Override
+	public @Nullable Message<?> getMessageFromGroup(Object groupId, UUID messageId) {
+		Query query =
+				Query.query(
+						Criteria.where(MessageDocumentFields.MESSAGE_ID).is(messageId)
+								.and(MessageDocumentFields.GROUP_ID).is(groupId));
+		MessageDocument document = getMongoTemplate().findOne(query, MessageDocument.class, this.collectionName);
+		return document != null ? document.getMessage() : null;
+	}
+
+	@Override
+	protected boolean doRemoveMessageFromGroupById(Object groupId, UUID messageId) {
+		Query query =
+				Query.query(
+						Criteria.where(MessageDocumentFields.MESSAGE_ID).is(messageId)
+								.and(MessageDocumentFields.GROUP_ID).is(groupId));
+		return getMongoTemplate()
+				.remove(query, this.collectionName)
+				.wasAcknowledged();
+	}
+
+	private void removeMessages(Object groupId, Collection<UUID> ids) {
+		Query query = groupIdQuery(groupId)
+				.addCriteria(Criteria.where(MessageDocumentFields.MESSAGE_ID).in(ids.toArray()));
+		getMongoTemplate().remove(query, this.collectionName);
+	}
+
+	@Override
+	protected @Nullable Message<?> doPollMessageFromGroup(final Object groupId) {
+		Sort sort = Sort.by(MessageDocumentFields.LAST_MODIFIED_TIME, MessageDocumentFields.SEQUENCE);
+		Query query = groupIdQuery(groupId).with(sort);
+		MessageDocument document = getMongoTemplate().findAndRemove(query, MessageDocument.class, collectionName);
+		Message<?> message = null;
+		if (document != null) {
+			message = document.getMessage();
+			updateGroup(groupId, lastModifiedUpdate());
+		}
+		return message;
+	}
+
+	@Override
+	protected void doSetLastReleasedSequenceNumberForGroup(Object groupId, int sequenceNumber) {
+		updateGroup(groupId, lastModifiedUpdate().set(MessageDocumentFields.LAST_RELEASED_SEQUENCE, sequenceNumber));
+	}
+
+	@Override
+	protected void doSetGroupCondition(Object groupId, String condition) {
+		updateGroup(groupId, lastModifiedUpdate().set("condition", condition));
+	}
+
+	@Override
+	protected void doCompleteGroup(Object groupId) {
+		updateGroup(groupId, lastModifiedUpdate().set(MessageDocumentFields.COMPLETE, true));
+	}
+
+	@Override
+	public Iterator<MessageGroup> iterator() {
+		Query query = Query.query(Criteria.where(MessageDocumentFields.GROUP_ID).exists(true));
+		Iterable<Object> groupIds =
+				getMongoTemplate()
+						.findDistinct(query, MessageDocumentFields.GROUP_ID, this.collectionName, Object.class);
+
+		return StreamSupport.stream(groupIds.spliterator(), false)
+				.map(this::getMessageGroup)
+				.iterator();
+
+	}
+
+	@Override
+	@ManagedAttribute
+	public int getMessageCountForAllMessageGroups() {
+		Query query = Query.query(Criteria.where(MessageDocumentFields.MESSAGE_ID).exists(true)
+				.and(MessageDocumentFields.GROUP_ID).exists(true));
+		long count = getMongoTemplate().count(query, this.collectionName);
+		Assert.isTrue(count <= Integer.MAX_VALUE, "Message count is out of Integer's range");
+		return (int) count;
+	}
+
+	@Override
+	@ManagedAttribute
+	public int getMessageGroupCount() {
+		Query query = Query.query(Criteria.where(MessageDocumentFields.GROUP_ID).exists(true));
+		return getMongoTemplate()
+				.findDistinct(query, MessageDocumentFields.GROUP_ID, this.collectionName, Object.class)
+				.size();
+	}
+
+	@Override
+	public @Nullable Message<?> getOneMessageFromGroup(Object groupId) {
+		Query query = groupOrderQuery(groupId);
+		MessageDocument messageDocument = getMongoTemplate().findOne(query, MessageDocument.class, this.collectionName);
+		if (messageDocument != null) {
+			return messageDocument.getMessage();
+		}
+		else {
+			return null;
+		}
+	}
+
+	@Override
+	public Collection<Message<?>> getMessagesForGroup(Object groupId) {
+		Query query = groupOrderQuery(groupId);
+		List<MessageDocument> documents = getMongoTemplate().find(query, MessageDocument.class, this.collectionName);
+
+		return documents.stream()
+				.map(MessageDocument::getMessage)
+				.collect(Collectors.toList());
+	}
+
+	@Override
+	public Stream<Message<?>> streamMessagesForGroup(Object groupId) {
+		Query query = groupOrderQuery(groupId);
+		Stream<MessageDocument> documents =
+				getMongoTemplate()
+						.stream(query, MessageDocument.class, this.collectionName);
+
+		return documents.map(MessageDocument::getMessage);
+	}
+
+	private void updateGroup(Object groupId, Update update) {
+		getMongoTemplate()
+				.findAndModify(groupOrderQuery(groupId), update, FindAndModifyOptions.none(), Map.class,
+						this.collectionName);
+	}
+
+	private static Update lastModifiedUpdate() {
+		return Update.update(MessageDocumentFields.LAST_MODIFIED_TIME, System.currentTimeMillis());
+	}
+
+	private static Query groupOrderQuery(Object groupId) {
+		Sort sort = Sort.by(Sort.Direction.DESC, MessageDocumentFields.LAST_MODIFIED_TIME,
+				MessageDocumentFields.SEQUENCE);
+		return groupIdQuery(groupId).with(sort);
+	}
+
+}
+
