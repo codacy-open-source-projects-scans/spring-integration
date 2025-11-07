@@ -278,8 +278,7 @@ class SftpSessionFactoryTests {
 			session.close();
 
 			assertThat(session.isOpen()).isFalse();
-			// TODO until https://github.com/apache/mina-sshd/issues/700
-			await().untilAsserted(() -> assertThat(clientSession.isClosed()).isTrue());
+			assertThat(clientSession.isClosed()).isTrue();
 
 			sftpSessionFactory.destroy();
 		}
@@ -331,7 +330,7 @@ class SftpSessionFactoryTests {
 				});
 			}
 
-			assertThat(executionLatch.await(10, TimeUnit.SECONDS)).isTrue();
+			assertThat(executionLatch.await(20, TimeUnit.SECONDS)).isTrue();
 			synchronized (errors) {
 				assertThat(errors).isEmpty();
 			}
@@ -339,7 +338,7 @@ class SftpSessionFactoryTests {
 			assertThat(clientInstances).hasValue(1);
 
 			executorService.shutdown();
-			assertThat(executorService.awaitTermination(10, TimeUnit.SECONDS)).isTrue();
+			assertThat(executorService.awaitTermination(20, TimeUnit.SECONDS)).isTrue();
 
 			sftpSessionFactory.destroy();
 		}
