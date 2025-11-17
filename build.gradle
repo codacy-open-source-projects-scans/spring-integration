@@ -92,7 +92,7 @@ ext {
     oracleVersion = '23.9.0.25.07'
     pahoMqttClientVersion = '1.2.5'
     postgresVersion = '42.7.8'
-    protobufVersion = '4.33.0'
+    protobufVersion = '4.33.1'
     r2dbch2Version = '1.0.1.RELEASE'
     reactorVersion = '2025.0.0'
     resilience4jVersion = '2.3.0'
@@ -107,8 +107,8 @@ ext {
     springSecurityVersion = '7.0.0-SNAPSHOT'
     springVersion = '7.0.0-SNAPSHOT'
     springWsVersion = '5.0.0-SNAPSHOT'
-    testcontainersVersion = '2.0.1'
-    tomcatVersion = '11.0.13'
+    testcontainersVersion = '2.0.2'
+    tomcatVersion = '11.0.14'
     xmlUnitVersion = '2.11.0'
     xstreamVersion = '1.4.21'
     ztZipVersion = '1.17'
@@ -623,6 +623,12 @@ project('spring-integration-groovy') {
     tasks.withType(JavaForkOptions) {
         jvmArgs '--add-opens', 'java.base/java.lang=ALL-UNNAMED'
     }
+
+    tasks.withType(GroovyCompile).configureEach {
+        options.fork = true
+        sourceCompatibility = JavaVersion.VERSION_17
+        options.encoding = 'UTF-8'
+    }
 }
 
 project('spring-integration-hazelcast') {
@@ -705,9 +711,7 @@ project('spring-integration-jms') {
         api 'org.springframework:spring-jms'
         provided "jakarta.jms:jakarta.jms-api:$jmsApiVersion"
 
-        testImplementation("org.apache.activemq:artemis-server:$artemisVersion") {
-            exclude group: 'org.jboss.logmanager'
-        }
+        testImplementation "org.apache.activemq:artemis-server:$artemisVersion"
         testImplementation "org.apache.activemq:artemis-jakarta-client:$artemisVersion"
         testImplementation 'org.springframework:spring-oxm'
         testImplementation 'tools.jackson.core:jackson-databind'
