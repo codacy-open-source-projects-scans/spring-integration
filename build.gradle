@@ -1,5 +1,5 @@
 buildscript {
-    ext.kotlinVersion = '2.3.0'
+    ext.kotlinVersion = '2.3.10'
     ext.isCI = System.getenv('GITHUB_ACTION')
     repositories {
         gradlePluginPortal()
@@ -66,7 +66,7 @@ ext {
 	grpcVersion = '1.78.0'
     hamcrestVersion = '3.0'
     hazelcastVersion = '5.6.0'
-    hibernateVersion = '7.2.3.Final'
+    hibernateVersion = '7.2.4.Final'
     hsqldbVersion = '2.7.4'
     h2Version = '2.4.240'
     jacksonVersion = '2.20.2'
@@ -76,7 +76,7 @@ ext {
     jeroMqVersion = '0.6.0'
     jmsApiVersion = '3.1.0'
     jpaApiVersion = '3.2.0'
-    jrubyVersion = '10.0.2.0'
+    jrubyVersion = '10.0.3.0'
     jsonpathVersion = '2.10.0'
     junitJupiterVersion = '6.0.2'
     junitPioneerVersion = '2.3.0'
@@ -88,9 +88,9 @@ ext {
     micrometerTracingVersion = '1.7.0-M2'
     micrometerVersion = '1.17.0-M1'
     mockitoVersion = '5.21.0'
-    mongoDriverVersion = '5.6.2'
+    mongoDriverVersion = '5.6.3'
     mysqlVersion = '9.5.0'
-    oracleVersion = '23.26.0.0.0'
+    oracleVersion = '23.26.1.0.0'
     pahoMqttClientVersion = '1.2.5'
     postgresVersion = '42.7.9'
     protobufVersion = '4.33.5'
