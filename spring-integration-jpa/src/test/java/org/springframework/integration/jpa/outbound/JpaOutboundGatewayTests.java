@@ -18,6 +18,7 @@ package org.springframework.integration.jpa.outbound;
 
 import java.util.List;
 
+import org.hibernate.DetachedObjectException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -67,13 +68,13 @@ public class JpaOutboundGatewayTests {
 	@Test
 	public void getAllStudentsStartingFromGivenRecord() {
 		List<?> students = studentService.getAllStudentsFromGivenRecord(1);
-		assertThat(students).isNotNull().hasSize(2);
+		assertThat(students).hasSize(2);
 	}
 
 	@Test
 	public void getAllStudentsWithMaxNumberOfRecords() {
 		List<?> students = studentService.getStudents(1);
-		assertThat(students).isNotNull().hasSize(1);
+		assertThat(students).hasSize(1);
 	}
 
 	@Test
@@ -82,6 +83,8 @@ public class JpaOutboundGatewayTests {
 		student.setRollNumber(3424234234L);
 		assertThatIllegalArgumentException()
 				.isThrownBy(() -> studentService.deleteStudent(student))
+				.havingCause()
+				.isInstanceOf(DetachedObjectException.class)
 				.withMessageStartingWith("Given entity is not associated with the persistence context");
 	}
 
@@ -102,7 +105,7 @@ public class JpaOutboundGatewayTests {
 	@Test
 	public void getAllStudents() {
 		List<StudentDomain> students = studentService.getAllStudents();
-		assertThat(students).isNotNull().hasSize(3);
+		assertThat(students).hasSize(3);
 	}
 
 	@Test
