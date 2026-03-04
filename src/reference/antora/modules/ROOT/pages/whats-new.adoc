@@ -14,6 +14,21 @@ For more details, see the https://github.com/spring-projects/spring-integration/
 In general, the project has been moved to the latest dependency versions.
 Java 17 is still the baseline, but Java 25 is supported.
 
+[[x7.1-new-components]]
+=== New Components
+
+[[x7.1-cloudevents]]
+==== CloudEvents Support
+
+The new `spring-integration-cloudevents` module has been introduced to support CloudEvents specification.
+See xref:cloudevents.adoc[] for more information.
+
+[[x7.1-grpc]]
+==== gRPC Support
+
+The new `spring-integration-grpc` module has been introduced to support gRPC framework.
+See xref:grpc.adoc[] for more information.
+
 [[x7.1-general-changes]]
 === General Changes
 
@@ -25,19 +40,6 @@ See xref:transformer.adoc[] for more information.
 
 The Web Services Outbound Gateway now can rely on the provided `WebServiceTemplate.defaultUri`.
 See xref:ws.adoc[] for more information.
-
-[[x7.1-cloudevents]]
-=== CloudEvents
-
-The new `spring-integration-cloudevents` module has been introduced to support CloudEvents specification.
-See xref:cloudevents.adoc[] for more information.
-
-[[x7.1-grpc]]
-=== gRPC
-
-The new `spring-integration-grpc` module has been introduced to support gRPC framework.
-See xref:grpc.adoc[] for more information.
-
 
 [[x7.1-testing-changes]]
 === Testing Support Changes
@@ -51,3 +53,17 @@ See xref:testing.adoc[] for more information.
 
 The `RedisMessageStore.doRemove` now uses `GETDEL` instead of `GET` + `UNLINK` for Redis 6.2+ by default.
 Use `RedisMessageStore.setUseUnlink(true)` to use `GET` + `UNLINK` when atomicity is not required and `GETDEL` causes noticeable Redis latency.
+See xref:redis.adoc[] for more information.
+
+[[x7.1-jms-changes]]
+=== JMS Support Changes
+
+JMS-backed message channels now map headers to JMS message properties and back.
+See xref:jms.adoc[] for more information.
+
+[[x7.1-http-changes]]
+=== HTTP Support Changes
+
+The `HttpRequestExecutingMessageHandler` (its XML and Java DSL) now can be used with a `RestClient`.
+The `RestTemplate` configuration is deprecated.
+See xref:http.adoc[] for more information.

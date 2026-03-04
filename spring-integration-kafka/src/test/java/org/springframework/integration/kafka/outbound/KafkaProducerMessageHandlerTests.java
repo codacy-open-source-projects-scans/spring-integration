@@ -351,12 +351,12 @@ class KafkaProducerMessageHandlerTests implements TestApplicationContextAware {
 	@SuppressWarnings({"rawtypes", "unchecked"})
 	@Test
 	void immediateFailure() {
-		Producer producer = mock(Producer.class);
+		Producer producer = mock();
 		CompletableFuture cf = new CompletableFuture();
 		RuntimeException rte = new RuntimeException("test.immediate");
 		cf.completeExceptionally(rte);
 		given(producer.send(any(), any())).willReturn(cf);
-		ProducerFactory pf = mock(ProducerFactory.class);
+		ProducerFactory pf = mock();
 		given(pf.createProducer()).willReturn(producer);
 		KafkaTemplate template = new KafkaTemplate(pf);
 		template.setDefaultTopic("foo");
@@ -480,9 +480,9 @@ class KafkaProducerMessageHandlerTests implements TestApplicationContextAware {
 	@SuppressWarnings({"rawtypes", "unchecked"})
 	@Test
 	void testTransaction() {
-		ProducerFactory pf = mock(ProducerFactory.class);
+		ProducerFactory pf = mock();
 		given(pf.transactionCapable()).willReturn(true);
-		Producer producer = mock(Producer.class);
+		Producer producer = mock();
 		given(pf.createProducer(isNull())).willReturn(producer);
 		willReturn(mock(Future.class)).given(producer).send(any(ProducerRecord.class), any(Callback.class));
 		KafkaTemplate template = new KafkaTemplate(pf);
@@ -502,7 +502,7 @@ class KafkaProducerMessageHandlerTests implements TestApplicationContextAware {
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	@Test
 	void testConsumeAndProduceTransaction() throws Exception {
-		Consumer mockConsumer = mock(Consumer.class);
+		Consumer mockConsumer = mock();
 		final TopicPartition topicPartition = new TopicPartition("foo", 0);
 		willAnswer(i -> {
 			((ConsumerRebalanceListener) i.getArgument(1))
@@ -521,9 +521,9 @@ class KafkaProducerMessageHandlerTests implements TestApplicationContextAware {
 				return null;
 			}
 		}).given(mockConsumer).poll(any(Duration.class));
-		ConsumerGroupMetadata meta = new ConsumerGroupMetadata("group");
+		ConsumerGroupMetadata meta = mock();
 		given(mockConsumer.groupMetadata()).willReturn(meta);
-		ConsumerFactory cf = mock(ConsumerFactory.class);
+		ConsumerFactory cf = mock();
 		willReturn(mockConsumer).given(cf).createConsumer("group", "", null, KafkaTestUtils.defaultPropertyOverrides());
 		Producer producer = mock(Producer.class);
 		given(producer.send(any(), any())).willReturn(mock(Future.class));
@@ -532,7 +532,7 @@ class KafkaProducerMessageHandlerTests implements TestApplicationContextAware {
 			closeLatch.countDown();
 			return null;
 		}).given(producer).close(any());
-		ProducerFactory pf = mock(ProducerFactory.class);
+		ProducerFactory pf = mock();
 		given(pf.transactionCapable()).willReturn(true);
 		willReturn(producer).given(pf).createProducer(isNull());
 		KafkaTransactionManager ptm = new KafkaTransactionManager(pf);
@@ -577,7 +577,7 @@ class KafkaProducerMessageHandlerTests implements TestApplicationContextAware {
 	@SuppressWarnings({"rawtypes", "unchecked"})
 	@Test
 	void testTransactionTxIdOverride() {
-		Producer producer = mock(Producer.class);
+		Producer producer = mock();
 		AtomicReference<String> txId = new AtomicReference<>();
 		DefaultKafkaProducerFactory pf = new DefaultKafkaProducerFactory(Collections.emptyMap()) {
 
@@ -609,8 +609,8 @@ class KafkaProducerMessageHandlerTests implements TestApplicationContextAware {
 	@SuppressWarnings({"rawtypes", "unchecked"})
 	@Test
 	void testTransactionSynch() {
-		Producer producer = mock(Producer.class);
-		ProducerFactory pf = mock(ProducerFactory.class);
+		Producer producer = mock();
+		ProducerFactory pf = mock();
 		given(pf.transactionCapable()).willReturn(true);
 		given(pf.createProducer(isNull())).willReturn(producer);
 		willReturn(mock(Future.class)).given(producer).send(any(ProducerRecord.class), any(Callback.class));
@@ -639,7 +639,7 @@ class KafkaProducerMessageHandlerTests implements TestApplicationContextAware {
 	@SuppressWarnings({"unchecked", "rawtypes"})
 	@Test
 	void testConsumeAndProduceTransactionTxIdOverride() throws Exception {
-		Consumer mockConsumer = mock(Consumer.class);
+		Consumer mockConsumer = mock();
 		final TopicPartition topicPartition = new TopicPartition("foo", 0);
 		willAnswer(i -> {
 			((ConsumerRebalanceListener) i.getArgument(1))
@@ -658,9 +658,9 @@ class KafkaProducerMessageHandlerTests implements TestApplicationContextAware {
 				return null;
 			}
 		}).given(mockConsumer).poll(any(Duration.class));
-		ConsumerGroupMetadata meta = new ConsumerGroupMetadata("group");
+		ConsumerGroupMetadata meta = mock();
 		given(mockConsumer.groupMetadata()).willReturn(meta);
-		ConsumerFactory cf = mock(ConsumerFactory.class);
+		ConsumerFactory cf = mock();
 		willReturn(mockConsumer).given(cf).createConsumer("group", "", null, KafkaTestUtils.defaultPropertyOverrides());
 		Producer producer = mock(Producer.class);
 		given(producer.send(any(), any())).willReturn(mock(Future.class));
@@ -740,8 +740,8 @@ class KafkaProducerMessageHandlerTests implements TestApplicationContextAware {
 	@SuppressWarnings({"rawtypes", "unchecked"})
 	@Test
 	void testFlush() {
-		ProducerFactory pf = mock(ProducerFactory.class);
-		Producer producer = mock(Producer.class);
+		ProducerFactory pf = mock();
+		Producer producer = mock();
 		given(pf.createProducer()).willReturn(producer);
 		willReturn(mock(Future.class)).given(producer).send(any(ProducerRecord.class), any(Callback.class));
 		KafkaTemplate template = new KafkaTemplate(pf);
@@ -763,8 +763,8 @@ class KafkaProducerMessageHandlerTests implements TestApplicationContextAware {
 	@SuppressWarnings({"rawtypes", "unchecked"})
 	@Test
 	void testNoFlush() {
-		ProducerFactory pf = mock(ProducerFactory.class);
-		Producer producer = mock(Producer.class);
+		ProducerFactory pf = mock();
+		Producer producer = mock();
 		given(pf.createProducer()).willReturn(producer);
 		willReturn(mock(Future.class)).given(producer).send(any(ProducerRecord.class), any(Callback.class));
 		KafkaTemplate template = new KafkaTemplate(pf);
@@ -783,8 +783,8 @@ class KafkaProducerMessageHandlerTests implements TestApplicationContextAware {
 	@SuppressWarnings({"rawtypes", "unchecked"})
 	@Test
 	void conversion() {
-		ProducerFactory pf = mock(ProducerFactory.class);
-		Producer producer = mock(Producer.class);
+		ProducerFactory pf = mock();
+		Producer producer = mock();
 		given(pf.createProducer()).willReturn(producer);
 		willReturn(mock(Future.class)).given(producer).send(any(ProducerRecord.class), any(Callback.class));
 		KafkaTemplate template = new KafkaTemplate(pf);

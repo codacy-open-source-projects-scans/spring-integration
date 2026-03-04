@@ -30,6 +30,7 @@ import reactor.test.StepVerifier;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.cassandra.core.CassandraOperations;
 import org.springframework.data.cassandra.core.InsertOptions;
 import org.springframework.data.cassandra.core.ReactiveCassandraOperations;
@@ -62,27 +63,27 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringJUnitConfig
 @DirtiesContext
-public class CassandraMessageHandlerTests implements CassandraContainerTest {
+class CassandraMessageHandlerTests implements CassandraContainerTest {
 
-	private static final SpelExpressionParser PARSER = new SpelExpressionParser();
-
-	@Autowired
-	public MessageHandler cassandraMessageHandler1;
+	static final SpelExpressionParser PARSER = new SpelExpressionParser();
 
 	@Autowired
-	public MessageHandler cassandraMessageHandler2;
+	MessageHandler cassandraMessageHandler1;
 
 	@Autowired
-	public MessageHandler cassandraMessageHandler3;
+	MessageHandler cassandraMessageHandler2;
 
 	@Autowired
-	public MessageHandler cassandraMessageHandler4;
+	MessageHandler cassandraMessageHandler3;
 
 	@Autowired
-	public CassandraOperations template;
+	MessageHandler cassandraMessageHandler4;
 
 	@Autowired
-	public FluxMessageChannel resultChannel;
+	CassandraOperations template;
+
+	@Autowired
+	FluxMessageChannel resultChannel;
 
 	@Test
 	void testBasicCassandraInsert() {
@@ -145,27 +146,28 @@ public class CassandraMessageHandlerTests implements CassandraContainerTest {
 		this.template.batchOps().delete(books);
 	}
 
-	@Configuration
+	@Configuration(proxyBeanMethods = false)
 	@EnableIntegration
-	public static class Config extends IntegrationTestConfig {
+	static class Config extends IntegrationTestConfig {
 
 		@Autowired
-		public ReactiveCassandraOperations template;
+		@Lazy
+		ReactiveCassandraOperations template;
 
 		@Bean
-		public MessageHandler cassandraMessageHandler1() {
+		MessageHandler cassandraMessageHandler1() {
 			CassandraMessageHandler cassandraMessageHandler = new CassandraMessageHandler(this.template);
 			cassandraMessageHandler.setAsync(false);
 			return cassandraMessageHandler;
 		}
 
 		@Bean
-		public PollableChannel messageChannel() {
+		PollableChannel messageChannel() {
 			return new NullChannel();
 		}
 
 		@Bean
-		public MessageHandler cassandraMessageHandler2() {
+		MessageHandler cassandraMessageHandler2(PollableChannel messageChannel) {
 			CassandraMessageHandler cassandraMessageHandler = new CassandraMessageHandler(this.template);
 
 			WriteOptions options =
@@ -175,13 +177,13 @@ public class CassandraMessageHandlerTests implements CassandraContainerTest {
 							.build();
 
 			cassandraMessageHandler.setWriteOptions(options);
-			cassandraMessageHandler.setOutputChannel(messageChannel());
+			cassandraMessageHandler.setOutputChannel(messageChannel);
 			cassandraMessageHandler.setAsync(false);
 			return cassandraMessageHandler;
 		}
 
 		@Bean
-		public MessageHandler cassandraMessageHandler3() {
+		MessageHandler cassandraMessageHandler3() {
 			CassandraMessageHandler cassandraMessageHandler = new CassandraMessageHandler(this.template);
 			String cqlIngest =
 					"insert into book (isbn, title, author, pages, saleDate, isInStock) values (?, ?, ?, ?, ?, ?)";
@@ -191,12 +193,12 @@ public class CassandraMessageHandlerTests implements CassandraContainerTest {
 		}
 
 		@Bean
-		public FluxMessageChannel resultChannel() {
+		FluxMessageChannel resultChannel() {
 			return new FluxMessageChannel();
 		}
 
 		@Bean
-		public MessageHandler cassandraMessageHandler4() {
+		MessageHandler cassandraMessageHandler4(FluxMessageChannel resultChannel) {
 			CassandraMessageHandler cassandraMessageHandler = new CassandraMessageHandler(this.template);
 			cassandraMessageHandler.setQuery("SELECT * FROM book WHERE author = :author limit :size");
 
@@ -206,7 +208,7 @@ public class CassandraMessageHandlerTests implements CassandraContainerTest {
 
 			cassandraMessageHandler.setParameterExpressions(params);
 
-			cassandraMessageHandler.setOutputChannel(resultChannel());
+			cassandraMessageHandler.setOutputChannel(resultChannel);
 			cassandraMessageHandler.setProducesReply(true);
 			return cassandraMessageHandler;
 		}

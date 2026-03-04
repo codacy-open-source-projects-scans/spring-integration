@@ -50,7 +50,7 @@ import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
  */
 @SpringJUnitConfig
 @DirtiesContext
-public class CassandraDslTests implements CassandraContainerTest {
+class CassandraDslTests implements CassandraContainerTest {
 
 	@Autowired
 	@Qualifier("cassandraTruncateFlow.input")
@@ -89,9 +89,9 @@ public class CassandraDslTests implements CassandraContainerTest {
 		this.cassandraTruncateFlowInput.send(new GenericMessage<>(""));
 	}
 
-	@Configuration
+	@Configuration(proxyBeanMethods = false)
 	@EnableIntegration
-	public static class Config extends IntegrationTestConfig {
+	static class Config extends IntegrationTestConfig {
 
 		@Bean
 		IntegrationFlow cassandraTruncateFlow(ReactiveCassandraOperations cassandraOperations) {

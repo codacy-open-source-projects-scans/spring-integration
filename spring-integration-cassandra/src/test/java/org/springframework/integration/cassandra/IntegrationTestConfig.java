@@ -27,7 +27,7 @@ import org.springframework.data.cassandra.core.cql.keyspace.CreateKeyspaceSpecif
 import org.springframework.integration.cassandra.test.domain.Book;
 
 /**
- * Setup any spring configuration for unit tests.
+ * Set up any spring configuration for unit tests.
  * Must be used in combination with {@link CassandraContainerTest}.
  *
  * @author David Webb
@@ -36,7 +36,7 @@ import org.springframework.integration.cassandra.test.domain.Book;
  *
  * @since 6.0
  */
-@Configuration
+@Configuration(proxyBeanMethods = false)
 public class IntegrationTestConfig extends AbstractReactiveCassandraConfiguration {
 
 	public String keyspaceName = randomKeyspaceName();

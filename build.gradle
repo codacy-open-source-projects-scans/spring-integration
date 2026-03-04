@@ -22,7 +22,7 @@ plugins {
     id 'io.spring.antora.generate-antora-yml' version '0.0.1'
     id 'com.google.protobuf' version '0.9.6' apply false
     id 'io.freefair.aggregate-javadoc' version '9.2.0'
-    id 'io.spring.nullability' version '0.0.11' apply false
+    id 'io.spring.nullability' version '0.0.12' apply false
 }
 
 if (isCI) {
@@ -38,11 +38,11 @@ description = 'Spring Integration'
 
 ext {
     linkHomepage = 'https://projects.spring.io/spring-integration'
-    linkCi = 'https://build.spring.io/browse/INT'
+    linkCi = 'https://github.com/spring-projects/spring-integration/actions/workflows/ci-snapshot.yml'
     linkIssue = 'https://github.com/spring-projects/spring-integration/issues'
     linkScmUrl = 'https://github.com/spring-projects/spring-integration'
-    linkScmConnection = 'scm:git:git://github.com/spring-projects/spring-integration.git'
-    linkScmDevConnection = 'scm:git:ssh://git@github.com:spring-projects/spring-integration.git'
+    linkScmConnection = 'git://github.com/spring-projects/spring-integration.git'
+    linkScmDevConnection = 'git@github.com:spring-projects/spring-integration.git'
 
     apacheSshdVersion = '2.17.1'
     artemisVersion = '2.51.0'
@@ -66,11 +66,11 @@ ext {
 	grpcVersion = '1.79.0'
     hamcrestVersion = '3.0'
     hazelcastVersion = '5.6.0'
-    hibernateVersion = '7.2.5.Final'
+    hibernateVersion = '7.2.6.Final'
     hsqldbVersion = '2.7.4'
     h2Version = '2.4.240'
-    jacksonVersion = '2.20.2'
-    jackson3Version = '3.0.4'
+    jacksonVersion = '2.21.1'
+    jackson3Version = '3.1.0'
     jaxbVersion = '4.0.6'
     jcifsVersion = '3.0.2'
     jeroMqVersion = '0.6.0'
@@ -85,10 +85,10 @@ ext {
     lettuceVersion = '7.4.0.RELEASE'
     log4jVersion = '2.25.3'
     mailVersion = '2.0.5'
-    micrometerTracingVersion = '1.7.0-M3'
-    micrometerVersion = '1.17.0-M2'
+    micrometerTracingVersion = '1.7.0-SNAPSHOT'
+    micrometerVersion = '1.17.0-SNAPSHOT'
     mockitoVersion = '5.21.0'
-    mongoDriverVersion = '5.6.3'
+    mongoDriverVersion = '5.7.0-beta1'
     mysqlVersion = '9.6.0'
     oracleVersion = '23.26.1.0.0'
     pahoMqttClientVersion = '1.2.5'
@@ -101,11 +101,11 @@ ext {
     rsocketVersion = '1.1.5'
     servletApiVersion = '6.1.0'
     smackVersion = '4.4.8'
-    springAmqpVersion = '4.1.0-M2'
+    springAmqpVersion = '4.1.0-SNAPSHOT'
     springDataVersion = '2026.0.0-SNAPSHOT'
     springGraphqlVersion = '2.0.2'
     springKafkaVersion = '4.1.0-SNAPSHOT'
-    springSecurityVersion = '7.1.0-M2'
+    springSecurityVersion = '7.1.0-SNAPSHOT'
     springVersion = '7.0.5'
     springWsVersion = '5.0.0'
     testcontainersVersion = '2.0.3'
@@ -273,6 +273,7 @@ configure(javaProjects) { subproject ->
             api project(':spring-integration-core')
         }
 
+		runtimeOnly 'com.github.spotbugs:spotbugs-annotations:4.9.8'
         testImplementation "org.awaitility:awaitility:$awaitilityVersion"
         testImplementation 'org.junit.jupiter:junit-jupiter-api'
         testImplementation 'org.junit.jupiter:junit-jupiter-params'
@@ -322,8 +323,9 @@ configure(javaProjects) { subproject ->
 
         enableAssertions = false
 
-        jvmArgs '-Xshare:off'
-    }
+        jvmArgs '-Xshare:off',
+				'--enable-native-access=ALL-UNNAMED'
+	}
 
     checkstyle {
         configDirectory.set(rootProject.file('src/checkstyle'))
@@ -866,8 +868,7 @@ project('spring-integration-scripting') {
     }
 
     tasks.withType(JavaForkOptions) {
-        jvmArgs '--add-opens', 'java.base/java.lang=ALL-UNNAMED',
-				'--enable-native-access=ALL-UNNAMED'
+        jvmArgs '--add-opens', 'java.base/java.lang=ALL-UNNAMED'
     }
 }
 

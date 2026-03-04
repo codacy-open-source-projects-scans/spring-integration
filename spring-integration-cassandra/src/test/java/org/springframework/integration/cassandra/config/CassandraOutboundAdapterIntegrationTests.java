@@ -56,25 +56,25 @@ import static org.assertj.core.api.Assertions.assertThat;
 class CassandraOutboundAdapterIntegrationTests implements CassandraContainerTest {
 
 	@Autowired
-	private ReactiveCassandraTemplate cassandraTemplate;
+	ReactiveCassandraTemplate cassandraTemplate;
 
 	@Autowired
-	private DirectChannel cassandraMessageHandler1;
+	DirectChannel cassandraMessageHandler1;
 
 	@Autowired
-	private DirectChannel cassandraMessageHandler2;
+	DirectChannel cassandraMessageHandler2;
 
 	@Autowired
-	private DirectChannel cassandraMessageHandler3;
+	DirectChannel cassandraMessageHandler3;
 
 	@Autowired
-	private DirectChannel cassandraMessageHandler4;
+	DirectChannel cassandraMessageHandler4;
 
 	@Autowired
-	private DirectChannel inputChannel;
+	DirectChannel inputChannel;
 
 	@Autowired
-	private FluxMessageChannel resultChannel;
+	FluxMessageChannel resultChannel;
 
 	@Test
 	void testBasicCassandraInsert() {
@@ -145,7 +145,7 @@ class CassandraOutboundAdapterIntegrationTests implements CassandraContainerTest
 		assertThat(books).hasSize(0);
 	}
 
-	@Configuration
+	@Configuration(proxyBeanMethods = false)
 	@EnableIntegration
 	@ImportResource("org/springframework/integration/cassandra/config/CassandraOutboundAdapterIntegrationTests-context.xml")
 	public static class Config extends IntegrationTestConfig {
