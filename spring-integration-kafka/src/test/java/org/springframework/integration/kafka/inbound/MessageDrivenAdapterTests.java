@@ -403,8 +403,8 @@ class MessageDrivenAdapterTests implements TestApplicationContextAware {
 	void testInboundBatch(EmbeddedKafkaBroker embeddedKafka) throws Exception {
 		Map<String, Object> props = KafkaTestUtils.consumerProps(embeddedKafka, "test2", true);
 		props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-		props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, 68);
-		props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 10000);
+		props.put(ConsumerConfig.FETCH_MIN_BYTES_CONFIG, 50);
+		props.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, 1000);
 
 		DefaultKafkaConsumerFactory<Integer, String> cf = new DefaultKafkaConsumerFactory<>(props);
 		ContainerProperties containerProps = new ContainerProperties(topic2);
@@ -478,9 +478,9 @@ class MessageDrivenAdapterTests implements TestApplicationContextAware {
 		});
 		PollableChannel errors = new QueueChannel();
 		adapter.setErrorChannel(errors);
-		template.sendDefault(1, "foo");
-		template.sendDefault(1, "bar");
-		Message<?> error = errors.receive(10000);
+		template.sendDefault(0, 1487694048607L, 1, "foo");
+		template.sendDefault(0, 1487694048608L, 1, "bar");
+		Message<?> error = errors.receive(30000);
 		assertThat(error).isNotNull();
 		assertThat(error.getPayload()).isInstanceOf(ConversionException.class);
 		assertThat(((ConversionException) error.getPayload()).getMessage())
