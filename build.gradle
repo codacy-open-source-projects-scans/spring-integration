@@ -34,9 +34,6 @@ ext {
     linkScmDevConnection = 'git@github.com:spring-projects/spring-integration.git'
 
     javaProjects = subprojects - project(':spring-integration-bom')
-
-	protobufVersion = libs.versions.protobufVersion.get()
-	grpcVersion = libs.versions.grpcVersion.get()
 }
 
 allprojects {
@@ -176,13 +173,11 @@ configure(javaProjects) { subproject ->
             api project(':spring-integration-core')
         }
 
-		def spotBugs = 'com.github.spotbugs:spotbugs-annotations:4.9.8'
-		compileOnly spotBugs
-		testImplementation spotBugs
+		compileOnly libs.com.github.spotbugs.annotations
+		testImplementation libs.com.github.spotbugs.annotations
 
-		def checkerFramework = 'org.checkerframework:checker-qual:3.54.1'
-		compileOnly checkerFramework
-		testImplementation checkerFramework
+		compileOnly libs.org.checkerframework.checker.qual
+		testImplementation libs.org.checkerframework.checker.qual
 
         testImplementation libs.org.awaitility
         testImplementation 'org.junit.jupiter:junit-jupiter-api'
@@ -449,7 +444,7 @@ project('spring-integration-core') {
 
     protobuf {
         protoc {
-            artifact = "com.google.protobuf:protoc:$protobufVersion"
+            artifact = "com.google.protobuf:protoc:${libs.versions.protobufVersion.get()}"
         }
     }
 
@@ -566,11 +561,11 @@ project('spring-integration-grpc') {
 
 	protobuf {
 		protoc {
-			artifact = "com.google.protobuf:protoc:$protobufVersion"
+			artifact = "com.google.protobuf:protoc:${libs.versions.protobufVersion.get()}"
 		}
 		plugins {
 			grpc {
-				artifact = "io.grpc:protoc-gen-grpc-java:$grpcVersion"
+				artifact = "io.grpc:protoc-gen-grpc-java:${libs.versions.grpcVersion.get()}"
 			}
 		}
 		generateProtoTasks {
