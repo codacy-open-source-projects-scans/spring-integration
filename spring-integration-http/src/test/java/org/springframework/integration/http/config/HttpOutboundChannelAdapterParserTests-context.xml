@@ -14,11 +14,6 @@
 
 	<outbound-channel-adapter id="minimalConfig" url="http://localhost/test1" channel="requests"/>
 
-	<outbound-channel-adapter id="restTemplateConfig" url="http://localhost/test1" channel="requests"
-							  rest-template="customRestTemplate"/>
-
-	<beans:bean id="customRestTemplate" class="org.springframework.web.client.RestTemplate"/>
-
 	<outbound-channel-adapter id="restClientConfig" url="http://localhost/test1" channel="requests"
 							  rest-client="customRestClient"/>
 
@@ -50,7 +45,7 @@
 	<outbound-channel-adapter id="withUrlAndTemplate"
 							  url="http://localhost/test1" channel="requests"
 							  uri-variables-expression="@uriVariables"
-							  rest-template="customRestTemplate"/>
+							  rest-client="customRestClient"/>
 
 	<outbound-channel-adapter id="withUrlExpression" url-expression="'http://localhost/test1'" channel="requests"/>
 
@@ -60,10 +55,6 @@
 					class="org.springframework.integration.http.config.HttpOutboundChannelAdapterParserTests$FooAdvice"/>
 		</request-handler-advice-chain>
 	</outbound-channel-adapter>
-
-	<outbound-channel-adapter id="withUrlExpressionAndTemplate"
-							  url-expression="'http://localhost/test1'" channel="requests"
-							  rest-template="customRestTemplate"/>
 
 	<si:channel id="queueChannel">
 		<si:queue capacity="10"/>

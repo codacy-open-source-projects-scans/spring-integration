@@ -33,17 +33,23 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import org.springframework.integration.jms.ActiveMQMultiContextTests;
+import org.springframework.integration.jms.DefaultJmsHeaderMapper;
+import org.springframework.integration.jms.StubTextMessage;
 import org.springframework.integration.jms.config.JmsChannelFactoryBean;
 import org.springframework.integration.support.MessageBuilder;
 import org.springframework.jms.connection.CachingConnectionFactory;
 import org.springframework.jms.core.JmsTemplate;
 import org.springframework.jms.support.JmsHeaders;
+import org.springframework.jms.support.converter.MessageConversionException;
+import org.springframework.jms.support.converter.MessageConverter;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
 import org.springframework.messaging.support.ChannelInterceptor;
 import org.springframework.messaging.support.GenericMessage;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
@@ -54,6 +60,7 @@ import static org.mockito.Mockito.verify;
  * @author Gary Russell
  * @author Gunnar Hillert
  * @author Artem Bilan
+ * @author Glenn Renfro
  */
 public class PollableJmsChannelTests extends ActiveMQMultiContextTests {
 
@@ -67,6 +74,7 @@ public class PollableJmsChannelTests extends ActiveMQMultiContextTests {
 		factoryBean.setConnectionFactory(ccf);
 		factoryBean.setDestination(queue);
 		factoryBean.setBeanFactory(mock());
+		factoryBean.setHeaderMapper(new DefaultJmsHeaderMapper("*"));
 		factoryBean.afterPropertiesSet();
 		PollableJmsChannel channel = (PollableJmsChannel) factoryBean.getObject();
 		boolean sent1 = channel.send(new GenericMessage<>("test1"));
@@ -82,6 +90,22 @@ public class PollableJmsChannelTests extends ActiveMQMultiContextTests {
 		Message<?> result2 = channel.receive(10000);
 		assertThat(result2).isNotNull();
 		assertThat(result2.getPayload()).isEqualTo("test2");
+	}
+
+	@Test
+	public void nullPayloadFromConverterThrowsMessageConversionException() throws Exception {
+		jakarta.jms.Message jmsMessage = new StubTextMessage("test");
+
+		MessageConverter messageConverter = mock();
+
+		JmsTemplate jmsTemplate = mock();
+		given(jmsTemplate.getMessageConverter()).willReturn(messageConverter);
+		given(jmsTemplate.receive()).willReturn(jmsMessage);
+
+		PollableJmsChannel channel = new PollableJmsChannel(jmsTemplate);
+
+		assertThatExceptionOfType(MessageConversionException.class)
+				.isThrownBy(() -> channel.receive(10000));
 	}
 
 	@Test
@@ -214,6 +238,7 @@ public class PollableJmsChannelTests extends ActiveMQMultiContextTests {
 		factoryBean.setMessageSelector("property='value'");
 
 		factoryBean.setBeanFactory(mock());
+		factoryBean.setHeaderMapper(new DefaultJmsHeaderMapper("*"));
 		factoryBean.afterPropertiesSet();
 		PollableJmsChannel channel = (PollableJmsChannel) factoryBean.getObject();
 		boolean sent1 = channel.send(new GenericMessage<>("test1"));

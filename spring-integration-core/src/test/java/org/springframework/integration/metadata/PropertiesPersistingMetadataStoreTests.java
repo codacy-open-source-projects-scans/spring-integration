@@ -17,6 +17,7 @@
 package org.springframework.integration.metadata;
 
 import java.io.File;
+import java.nio.file.Files;
 import java.util.Properties;
 
 import org.junit.jupiter.api.Test;
@@ -33,6 +34,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * @author Gunnar Hillert
  * @author Gary Russell
  * @author Artem Bilan
+ * @author Uwez Khan
+ * @author Glenn Renfro
  *
  * @since 2.0
  */
@@ -89,6 +92,45 @@ public class PropertiesPersistingMetadataStoreTests {
 		assertThat(persistentProperties).isNotNull();
 		assertThat(persistentProperties.size()).isEqualTo(1);
 		assertThat(persistentProperties.get("foo")).isEqualTo("bar");
+	}
+
+	@Test
+	public void flushRetriesAfterFailedPersisting() throws Exception {
+		File baseDir = new File(folder, "metadata-retry");
+		File file = new File(baseDir, "metadata-store.properties");
+		PropertiesPersistingMetadataStore metadataStore = new PropertiesPersistingMetadataStore();
+		metadataStore.setBaseDirectory(baseDir.getAbsolutePath());
+		metadataStore.afterPropertiesSet();
+		metadataStore.put("lastProcessedId", "42");
+
+		Files.delete(file.toPath());
+		Files.delete(baseDir.toPath());
+		metadataStore.flush();
+
+		Files.createDirectory(baseDir.toPath());
+		metadataStore.flush();
+
+		PropertiesPersistingMetadataStore restored = new PropertiesPersistingMetadataStore();
+		restored.setBaseDirectory(baseDir.getAbsolutePath());
+		restored.afterPropertiesSet();
+
+		assertThat(restored.get("lastProcessedId")).isEqualTo("42");
+	}
+
+	@Test
+	public void metadataStoreFileAndCreatedDirectoryAreOwnerOnly() throws Exception {
+		File baseDir = new File(folder, "secure-store");
+		File file = new File(baseDir, "metadata-store.properties");
+		PropertiesPersistingMetadataStore metadataStore = new PropertiesPersistingMetadataStore();
+		metadataStore.setBaseDirectory(baseDir.getAbsolutePath());
+		metadataStore.afterPropertiesSet();
+		metadataStore.put("lastProcessedId", "42");
+		metadataStore.close();
+
+		assertThat(file).exists();
+
+		assertThat(file).canRead().canWrite();
+		assertThat(baseDir).canRead().canWrite().isExecutable();
 	}
 
 }

@@ -18,6 +18,7 @@ package org.springframework.integration.groovy.dsl.test
 
 import groovy.transform.CompileStatic
 import org.junit.jupiter.api.Test
+import org.junitpioneer.jupiter.RetryingTest
 import org.springframework.beans.factory.BeanFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.beans.factory.annotation.Qualifier
@@ -85,7 +86,7 @@ class GroovyDslTests {
 		assert this.pollerResultChannel.receive(10000) != null
 	}
 
-	@Test
+	@RetryingTest(10)
 	void 'requestReplyFlow has to reply'() {
 		def replyChannel = new QueueChannel()
 		def testMessage =
@@ -133,7 +134,7 @@ class GroovyDslTests {
 				integrationFlow(publisher) {
 					transform {
 						it.<Message<Integer>, Integer>transformer { it.payload * 2 }
-						expectedType Message<Integer>
+						expectedType Message
 						id 'foo'
 					}
 					channel fluxChannel
@@ -288,7 +289,7 @@ class GroovyDslTests {
 
 		@Bean
 		functionFlow() {
-			integrationFlow Function<byte[], String>,
+			integrationFlow Function,
 					{ beanName 'functionGateway' },
 					{
 						transform {
@@ -299,7 +300,7 @@ class GroovyDslTests {
 							transformer { it.toUpperCase() }
 						}
 						splitWith {
-							expectedType Message<?>
+							expectedType Message
 							function { it.payload }
 						}
 						splitWith {

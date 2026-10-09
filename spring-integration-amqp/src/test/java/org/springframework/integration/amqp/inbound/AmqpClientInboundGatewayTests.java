@@ -27,6 +27,7 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import org.springframework.amqp.core.Declarables;
+import org.springframework.amqp.core.Message;
 import org.springframework.amqp.core.MessageBuilder;
 import org.springframework.amqp.core.Queue;
 import org.springframework.amqp.rabbitmq.client.AmqpConnectionFactory;
@@ -50,6 +51,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * @author Artem Bilan
+ * @author Kumar Gaurav
  *
  * @since 7.0
  */
@@ -59,6 +61,9 @@ public class AmqpClientInboundGatewayTests implements RabbitTestContainer {
 
 	@Autowired
 	RabbitAmqpTemplate rabbitTemplate;
+
+	@Autowired
+	RabbitAmqpTemplate replyQueueWithSpaceTemplate;
 
 	@Autowired
 	ContextConfiguration contextConfiguration;
@@ -72,7 +77,7 @@ public class AmqpClientInboundGatewayTests implements RabbitTestContainer {
 
 	@Test
 	void inboundGatewayExchangeWithAck() throws InterruptedException {
-		org.springframework.amqp.core.Message requestMessage =
+		Message requestMessage =
 				MessageBuilder.withBody("test data #2".getBytes())
 						.setMessageId("someMessageId")
 						.setContentType(MimeTypeUtils.TEXT_PLAIN_VALUE)
@@ -88,6 +93,13 @@ public class AmqpClientInboundGatewayTests implements RabbitTestContainer {
 				});
 
 		assertThat(this.contextConfiguration.acknowledged.await(10, TimeUnit.SECONDS)).isTrue();
+	}
+
+	@Test
+	void replyToQueueNameWithSpaceIsHonored() {
+		assertThat(this.replyQueueWithSpaceTemplate.convertSendAndReceive("q3", "test data #3"))
+				.succeedsWithin(Duration.ofSeconds(10))
+				.isEqualTo("TEST DATA #3");
 	}
 
 	@Configuration(proxyBeanMethods = false)
@@ -115,7 +127,8 @@ public class AmqpClientInboundGatewayTests implements RabbitTestContainer {
 
 		@Bean
 		Declarables declarables() {
-			return new Declarables(Stream.of("q1", "q2", "replyQueue").map(Queue::new).toArray(Queue[]::new));
+			return new Declarables(
+					Stream.of("q1", "q2", "q3", "replyQueue", "reply queue").map(Queue::new).toArray(Queue[]::new));
 		}
 
 		@Bean
@@ -124,10 +137,29 @@ public class AmqpClientInboundGatewayTests implements RabbitTestContainer {
 		}
 
 		@Bean
+		RabbitAmqpTemplate replyQueueWithSpaceTemplate(AmqpConnectionFactory connectionFactory) {
+			RabbitAmqpTemplate rabbitAmqpTemplate = new RabbitAmqpTemplate(connectionFactory);
+			rabbitAmqpTemplate.setReplyToQueue("reply queue");
+			return rabbitAmqpTemplate;
+		}
+
+		@Bean
 		AmqpClientInboundGateway amqpClientInboundGateway(AmqpConnectionFactory connectionFactory) {
 			AmqpClientInboundGateway amqpClientInboundGateway = new AmqpClientInboundGateway(connectionFactory, "q1");
 			amqpClientInboundGateway.setRequestChannelName("inputChannel");
 			return amqpClientInboundGateway;
+		}
+
+		@Bean
+		AmqpClientInboundGateway replyQueueWithSpaceAmqpClientInboundGateway(AmqpConnectionFactory connectionFactory) {
+			AmqpClientInboundGateway amqpClientInboundGateway = new AmqpClientInboundGateway(connectionFactory, "q3");
+			amqpClientInboundGateway.setRequestChannelName("q3InputChannel");
+			return amqpClientInboundGateway;
+		}
+
+		@ServiceActivator(inputChannel = "q3InputChannel")
+		String toUpperCaseForQ3(String body) {
+			return body.toUpperCase();
 		}
 
 		@Bean

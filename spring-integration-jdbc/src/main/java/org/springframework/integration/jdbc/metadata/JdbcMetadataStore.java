@@ -34,12 +34,19 @@ import org.springframework.jdbc.core.JdbcOperations;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.Assert;
+import org.springframework.util.StringUtils;
 
 /**
  * Implementation of {@link ConcurrentMetadataStore} using a relational database via JDBC.
  * SQL scripts to create the necessary tables are packaged as
  * <code>org/springframework/integration/jdbc/schema-*.sql</code>,
  * where <code>*</code> is the target database type.
+ * <p>
+ * The {@code METADATA_VALUE} column is {@code NOT NULL}. Values passed to
+ * {@link #put(String, String)} and {@link #putIfAbsent(String, String)} must be non-null;
+ * a {@code null} value cannot be stored and is rejected by the API.
+ * Existing databases created with older schema scripts should migrate the column to
+ * {@code NOT NULL} (and remove any rows with a {@code null} value) when upgrading.
  * <p>
  * The transaction management is required to use this {@link ConcurrentMetadataStore}.
  * <p>
@@ -52,6 +59,8 @@ import org.springframework.util.Assert;
  * @author Bojan Vukasovic
  * @author Artem Bilan
  * @author Gary Russell
+ * @author Sanghun Lee
+ * @author Burak Kalayci
  *
  * @since 5.0
  */
@@ -117,6 +126,8 @@ public class JdbcMetadataStore implements ConcurrentMetadataStore, InitializingB
 
 	private boolean checkDatabaseOnStart = true;
 
+	private boolean lockHintProvided;
+
 	/**
 	 * Instantiate a {@link JdbcMetadataStore} using provided dataSource {@link DataSource}.
 	 * @param dataSource a {@link DataSource}
@@ -176,6 +187,7 @@ public class JdbcMetadataStore implements ConcurrentMetadataStore, InitializingB
 				this.jdbcTemplate.execute((ConnectionCallback<String>) connection ->
 						connection.getMetaData().getDatabaseProductName());
 		this.getValueQuery = String.format(this.getValueQuery, this.tablePrefix);
+		this.lockHintProvided = StringUtils.hasText(this.lockHint);
 		this.getValueForUpdateQuery = String.format(this.getValueForUpdateQuery, this.tablePrefix, this.lockHint);
 		this.replaceValueQuery = String.format(this.replaceValueQuery, this.tablePrefix);
 		this.replaceValueByKeyQuery = String.format(this.replaceValueByKeyQuery, this.tablePrefix);
@@ -240,7 +252,17 @@ public class JdbcMetadataStore implements ConcurrentMetadataStore, InitializingB
 					return this.jdbcTemplate.queryForObject(this.getValueQuery, String.class, key, this.region);
 				}
 				catch (EmptyResultDataAccessException e) {
-					//somebody deleted it between calls. try to insert again (go to beginning of while loop)
+					//the insert saw the row, so this snapshot is older than its commit. read it under
+					//a lock, which is not served from the snapshot. no point without a lock hint
+					if (this.lockHintProvided) {
+						try {
+							return this.jdbcTemplate.queryForObject(this.getValueForUpdateQuery, String.class, key,
+									this.region);
+						}
+						catch (EmptyResultDataAccessException ex) {
+							//somebody deleted it between calls. try to insert again (go to beginning of while loop)
+						}
+					}
 				}
 			}
 		}

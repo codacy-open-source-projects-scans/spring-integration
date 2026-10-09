@@ -19,6 +19,8 @@ package org.springframework.integration.http.outbound;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 import org.jspecify.annotations.Nullable;
 
@@ -27,6 +29,7 @@ import org.springframework.expression.Expression;
 import org.springframework.expression.common.LiteralExpression;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.ClientHttpRequestFactory;
 import org.springframework.http.converter.HttpMessageConverter;
@@ -34,16 +37,14 @@ import org.springframework.integration.expression.ValueExpression;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageHandlingException;
 import org.springframework.util.Assert;
-import org.springframework.web.client.ResponseErrorHandler;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.DefaultUriBuilderFactory;
 
 /**
  * A {@link org.springframework.messaging.MessageHandler}
  * implementation that executes HTTP requests by delegating
- * to a {@link RestTemplate} or {@link RestClient} instance.
+ * to a {@link RestClient} or {@link org.springframework.web.client.RestTemplate} instance.
  * If the 'expectReply' flag is set to true (the default)
  * then a reply Message will be generated from the HTTP response. If that response contains
  * a body, it will be used as the reply Message's payload. Otherwise the reply Message's
@@ -63,12 +64,15 @@ import org.springframework.web.util.DefaultUriBuilderFactory;
  * @author Wallace Wadge
  * @author Shiliang Li
  * @author Arun Sethumadhavan
+ * @author Glenn Renfro
+ * @author Burak Kalayci
  *
  * @since 2.0
  */
 public class HttpRequestExecutingMessageHandler extends AbstractHttpRequestExecutingMessageHandler {
 
-	private final @Nullable RestTemplate restTemplate;
+	@SuppressWarnings("removal")
+	private final org.springframework.web.client.@Nullable RestTemplate restTemplate;
 
 	private volatile @Nullable RestClient restClient;
 
@@ -109,7 +113,9 @@ public class HttpRequestExecutingMessageHandler extends AbstractHttpRequestExecu
 	 * @deprecated Since 7.1 in favor of {@link RestClient}-based configuration.
 	 */
 	@Deprecated(since = "7.1", forRemoval = true)
-	public HttpRequestExecutingMessageHandler(String uri, @Nullable RestTemplate restTemplate) {
+	@SuppressWarnings("removal")
+	public HttpRequestExecutingMessageHandler(String uri,
+			org.springframework.web.client.@Nullable RestTemplate restTemplate) {
 		this(new LiteralExpression(uri), restTemplate);
 		/*
 		 *  We'd prefer to do this assertion first, but the compiler doesn't allow it. However,
@@ -127,7 +133,9 @@ public class HttpRequestExecutingMessageHandler extends AbstractHttpRequestExecu
 	 * @deprecated Since 7.1 in favor of {@link RestClient}-based configuration.
 	 */
 	@Deprecated(since = "7.1", forRemoval = true)
-	public HttpRequestExecutingMessageHandler(Expression uriExpression, @Nullable RestTemplate restTemplate) {
+	@SuppressWarnings("removal")
+	public HttpRequestExecutingMessageHandler(Expression uriExpression,
+			org.springframework.web.client.@Nullable RestTemplate restTemplate) {
 		this(uriExpression, restTemplate, null);
 	}
 
@@ -158,8 +166,9 @@ public class HttpRequestExecutingMessageHandler extends AbstractHttpRequestExecu
 		this(uriExpression, null, restClient);
 	}
 
+	@SuppressWarnings("removal")
 	private HttpRequestExecutingMessageHandler(Expression uriExpression,
-			@Nullable RestTemplate restTemplate, @Nullable RestClient restClient) {
+			org.springframework.web.client.@Nullable RestTemplate restTemplate, @Nullable RestClient restClient) {
 
 		super(uriExpression);
 		Assert.isTrue(restTemplate == null || restClient == null,
@@ -215,11 +224,16 @@ public class HttpRequestExecutingMessageHandler extends AbstractHttpRequestExecu
 	}
 
 	/**
-	 * Set the {@link ResponseErrorHandler} for the underlying {@link RestTemplate}.
+	 * Set the {@link org.springframework.web.client.ResponseErrorHandler} for the underlying
+	 * {@link org.springframework.web.client.RestTemplate}.
 	 * @param errorHandler The error handler.
-	 * @see RestTemplate#setErrorHandler(ResponseErrorHandler)
+	 * @deprecated Use {@link #setDefaultStatusHandler(RestClient.ResponseSpec.ErrorHandler)}
+	 * or {@link #defaultStatusHandler(Predicate, RestClient.ResponseSpec.ErrorHandler)}
+	 * @see org.springframework.web.client.RestTemplate#setErrorHandler(org.springframework.web.client.ResponseErrorHandler)
 	 */
-	public void setErrorHandler(ResponseErrorHandler errorHandler) {
+	@Deprecated(since = "7.2", forRemoval = true)
+	@SuppressWarnings("removal")
+	public void setErrorHandler(org.springframework.web.client.ResponseErrorHandler errorHandler) {
 		assertLocalClient("errorHandler");
 		RestClient.Builder localRestClientBuilder = this.localRestClientBuilder;
 		Assert.state(localRestClientBuilder != null, "'localRestClientBuilder' must not be null");
@@ -227,10 +241,37 @@ public class HttpRequestExecutingMessageHandler extends AbstractHttpRequestExecu
 	}
 
 	/**
-	 * Set a list of {@link HttpMessageConverter}s to be used by the underlying {@link RestTemplate}.
+	 * Set the {@link RestClient.ResponseSpec.ErrorHandler} for the underlying {@link RestClient}, applied to any
+	 * {@link HttpStatusCode#isError() error} response status.
+	 * @param errorHandler The error handler.
+	 * @since 7.2
+	 */
+	public void setDefaultStatusHandler(RestClient.ResponseSpec.ErrorHandler errorHandler) {
+		defaultStatusHandler(HttpStatusCode::isError, errorHandler);
+	}
+
+	/**
+	 * Set the status {@link Predicate} and {@link RestClient.ResponseSpec.ErrorHandler} for the underlying
+	 * {@link RestClient}.
+	 * @param predicate the predicate for the response status to match for this error handler.
+	 * @param errorHandler The error handler.
+	 * @since 7.2
+	 */
+	public void defaultStatusHandler(Predicate<HttpStatusCode> predicate,
+			RestClient.ResponseSpec.ErrorHandler errorHandler) {
+
+		assertLocalClient("errorHandler");
+		RestClient.Builder localRestClientBuilder = this.localRestClientBuilder;
+		Assert.state(localRestClientBuilder != null, "'localRestClientBuilder' must not be null");
+
+		localRestClientBuilder.defaultStatusHandler(predicate, errorHandler);
+	}
+
+	/**
+	 * Set a list of {@link HttpMessageConverter}s to be used by the underlying {@link RestClient}.
 	 * Converters configured via this method will override the default converters.
 	 * @param messageConverters The message converters.
-	 * @see RestTemplate#setMessageConverters(java.util.List)
+	 * @see RestClient.Builder#configureMessageConverters(Consumer)
 	 */
 	public void setMessageConverters(List<HttpMessageConverter<?>> messageConverters) {
 		assertLocalClient("messageConverters");
@@ -244,9 +285,9 @@ public class HttpRequestExecutingMessageHandler extends AbstractHttpRequestExecu
 	}
 
 	/**
-	 * Set the {@link ClientHttpRequestFactory} for the underlying {@link RestTemplate}.
+	 * Set the {@link ClientHttpRequestFactory} for the underlying {@link RestClient}.
 	 * @param requestFactory The request factory.
-	 * @see RestTemplate#setRequestFactory(ClientHttpRequestFactory)
+	 * @see RestClient.Builder#requestFactory(ClientHttpRequestFactory)
 	 */
 	public void setRequestFactory(ClientHttpRequestFactory requestFactory) {
 		assertLocalClient("requestFactory");
@@ -291,10 +332,11 @@ public class HttpRequestExecutingMessageHandler extends AbstractHttpRequestExecu
 		}
 	}
 
+	@SuppressWarnings("removal")
 	private ResponseEntity<?> exchangeWithRestTemplate(Object uri, HttpMethod httpMethod, HttpEntity<?> httpRequest,
 			Object expectedResponseType, Map<String, ?> uriVariables) {
 
-		RestTemplate restTemplate = this.restTemplate;
+		org.springframework.web.client.RestTemplate restTemplate = this.restTemplate;
 		Assert.state(restTemplate != null, "'restTemplate' must not be null");
 
 		if (uri instanceof URI uriToUse) {

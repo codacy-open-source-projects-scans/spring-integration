@@ -30,6 +30,7 @@ import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 
 import org.springframework.integration.IntegrationMessageHeaderAccessor;
+import org.springframework.integration.support.utils.PatternMatchUtils;
 import org.springframework.jms.support.JmsHeaders;
 import org.springframework.messaging.MessageHeaders;
 import org.springframework.util.StringUtils;
@@ -38,21 +39,22 @@ import org.springframework.util.StringUtils;
  * Default implementation of {@link JmsHeaderMapper}.
  * <p>
  * This implementation copies JMS API headers (e.g. JMSReplyTo) to and from
- * Spring Integration Messages. Any user-defined properties will also be copied
- * from a JMS Message to a Spring Integration Message, and any other headers
- * on a Spring Integration Message (beyond the JMS API headers) will likewise
- * be copied to a JMS Message. Those other headers will be copied to the
- * general properties of a JMS Message whereas the JMS API headers are passed
- * to the appropriate setter methods (e.g. setJMSReplyTo).
+ * Spring Integration Messages. JMS properties are mapped inbound only if their
+ * names match the configured {@code propertyNames} patterns. All eligible Spring
+ * Integration message headers are copied outbound to JMS general properties,
+ * while JMS API headers are passed to the appropriate setter methods
+ * (e.g. {@code setJMSReplyTo}).
  * <p>
- * Constants for the JMS API headers are defined in {@link JmsHeaders}.
- * Note that the JMSMessageID and JMSRedelivered flag are only copied
- * <em>from</em> a JMS Message. Those values will <em>not</em> be passed
- * along from a Spring Integration Message to an outbound JMS Message.
+ * Use {@link #DefaultJmsHeaderMapper(String...)} to set the inbound
+ * allowlist. Values support simple wildcard patterns (e.g. {@code "myPrefix*"},
+ * {@code "*mySuffix"}) and negation (e.g. {@code "!unwanted*"}).
+ * Pass {@code "*"} to allow all user-defined JMS properties.
+ * <p>
  *
  * @author Mark Fisher
  * @author Gary Russell
  * @author Artem Bilan
+ * @author Glenn Renfro
  */
 public class DefaultJmsHeaderMapper extends JmsHeaderMapper {
 
@@ -71,6 +73,27 @@ public class DefaultJmsHeaderMapper extends JmsHeaderMapper {
 	private volatile boolean mapInboundDeliveryMode = false;
 
 	private volatile boolean mapInboundExpiration = false;
+
+	private volatile String[] propertyNames = { MessageHeaders.CONTENT_TYPE };
+
+	/**
+	 * Default constructor for this mapper.
+	 * @since 5.5.22
+	 */
+	public DefaultJmsHeaderMapper() {
+
+	}
+
+	/**
+	 * Construct a {@code DefaultJmsHeaderMapper} with the specified inbound property name patterns.
+	 * The default property entry name for {@code propertyNames} is {@link MessageHeaders#CONTENT_TYPE}.
+	 * @param propertyNames the property name patterns to allow; supports {@code *} wildcards and {@code !}
+	 * negation.
+	 * @since 5.5.22
+	 */
+	public DefaultJmsHeaderMapper(String... propertyNames) {
+		this.propertyNames = propertyNames.clone();
+	}
 
 	/**
 	 * Suppress the mapping of inbound priority by using this setter with 'false'.
@@ -129,7 +152,7 @@ public class DefaultJmsHeaderMapper extends JmsHeaderMapper {
 	}
 
 	@Override
-	public void fromHeaders(MessageHeaders headers, jakarta.jms.Message jmsMessage) {
+	public void fromHeaders(MessageHeaders headers, Message jmsMessage) {
 		try {
 			populateCorrelationIdPropertyFromHeaders(headers, jmsMessage);
 			populateReplyToPropertyFromHeaders(headers, jmsMessage);
@@ -154,7 +177,7 @@ public class DefaultJmsHeaderMapper extends JmsHeaderMapper {
 		}
 	}
 
-	private void populateCorrelationIdPropertyFromHeaders(MessageHeaders headers, jakarta.jms.Message jmsMessage) {
+	private void populateCorrelationIdPropertyFromHeaders(MessageHeaders headers, Message jmsMessage) {
 		Object jmsCorrelationId = headers.get(JmsHeaders.CORRELATION_ID);
 		if (jmsCorrelationId instanceof Number) {
 			jmsCorrelationId = jmsCorrelationId.toString();
@@ -169,7 +192,7 @@ public class DefaultJmsHeaderMapper extends JmsHeaderMapper {
 		}
 	}
 
-	private void populateReplyToPropertyFromHeaders(MessageHeaders headers, jakarta.jms.Message jmsMessage) {
+	private void populateReplyToPropertyFromHeaders(MessageHeaders headers, Message jmsMessage) {
 		Object jmsReplyTo = headers.get(JmsHeaders.REPLY_TO);
 		if (jmsReplyTo instanceof Destination destination) {
 			try {
@@ -181,7 +204,7 @@ public class DefaultJmsHeaderMapper extends JmsHeaderMapper {
 		}
 	}
 
-	private void populateTypePropertyFromHeaders(MessageHeaders headers, jakarta.jms.Message jmsMessage) {
+	private void populateTypePropertyFromHeaders(MessageHeaders headers, Message jmsMessage) {
 		Object jmsType = headers.get(JmsHeaders.TYPE);
 		if (jmsType instanceof String jmsTypeStr) {
 			try {
@@ -193,7 +216,7 @@ public class DefaultJmsHeaderMapper extends JmsHeaderMapper {
 		}
 	}
 
-	private void populateArbitraryHeaderToProperty(jakarta.jms.Message jmsMessage, String headerName, Object value)
+	private void populateArbitraryHeaderToProperty(Message jmsMessage, String headerName, Object value)
 			throws JMSException {
 
 		if (SUPPORTED_PROPERTY_TYPES.contains(value.getClass())) {
@@ -221,7 +244,7 @@ public class DefaultJmsHeaderMapper extends JmsHeaderMapper {
 	}
 
 	@Override
-	public Map<String, Object> toHeaders(jakarta.jms.Message jmsMessage) {
+	public Map<String, Object> toHeaders(Message jmsMessage) {
 		Map<String, Object> headers = new HashMap<>();
 		try {
 			mapMessageIdProperty(jmsMessage, headers);
@@ -361,8 +384,10 @@ public class DefaultJmsHeaderMapper extends JmsHeaderMapper {
 
 	private void mapArbitraryProperty(Message jmsMessage, Map<String, Object> headers, String propertyName) {
 		try {
-			String headerName = toHeaderName(propertyName);
-			headers.put(headerName, jmsMessage.getObjectProperty(propertyName));
+			if (shouldMapInboundProperty(propertyName)) {
+				String headerName = toHeaderName(propertyName);
+				headers.put(headerName, jmsMessage.getObjectProperty(propertyName));
+			}
 		}
 		catch (Exception ex) {
 			if (LOGGER.isWarnEnabled()) {
@@ -399,6 +424,14 @@ public class DefaultJmsHeaderMapper extends JmsHeaderMapper {
 			headerName = MessageHeaders.CONTENT_TYPE;
 		}
 		return headerName;
+	}
+
+	private boolean shouldMapInboundProperty(String propertyName) {
+		boolean isMatch =  Boolean.TRUE.equals(PatternMatchUtils.smartMatch(propertyName, this.propertyNames));
+		if (!isMatch && LOGGER.isInfoEnabled()) {
+			LOGGER.info("Inbound property '" + propertyName + "' is not mapped to a header.");
+		}
+		return isMatch;
 	}
 
 }

@@ -49,6 +49,7 @@ import org.junit.jupiter.params.ParameterizedClass;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.mockito.Mockito;
 
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.data.redis.RedisSystemException;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.BoundValueOperations;
@@ -915,11 +916,7 @@ class RedisLockRegistryTests implements RedisContainerTest {
 					// remove lock
 					registry.expireUnusedOlderThan(EXPIRATION_TIME_MILLIS);
 					// obtain new lock and try to acquire
-					Lock lock = registry.obtain(lockKey);
-					lock.tryLock(LOCK_WAIT_TIME_MILLIS, TimeUnit.MILLISECONDS);
-					lock.unlock();
-
-					lock1.set(lock);
+					lock1.set(obtainAndLock(registry, lockKey, LOCK_WAIT_TIME_MILLIS));
 				}
 				catch (InterruptedException ignore) {
 				}
@@ -931,11 +928,7 @@ class RedisLockRegistryTests implements RedisContainerTest {
 					// remove lock
 					registry.expireUnusedOlderThan(EXPIRATION_TIME_MILLIS);
 					// obtain new lock and try to acquire
-					Lock lock = registry.obtain(lockKey);
-					lock.tryLock(LOCK_WAIT_TIME_MILLIS, TimeUnit.MILLISECONDS);
-					lock.unlock();
-
-					lock2.set(lock);
+					lock2.set(obtainAndLock(registry, lockKey, LOCK_WAIT_TIME_MILLIS));
 				}
 				catch (InterruptedException ignore) {
 				}
@@ -952,6 +945,28 @@ class RedisLockRegistryTests implements RedisContainerTest {
 		}
 
 		registry.destroy();
+	}
+
+	/**
+	 * Obtains a lock for the key and tries to acquire it, retrying with a fresh
+	 * {@link Lock} whenever the previously obtained one has been concurrently evicted
+	 * from the registry cache (as documented for an unused, not yet locked entry).
+	 */
+	private static Lock obtainAndLock(RedisLockRegistry registry, String lockKey, long lockWaitTimeMillis)
+			throws InterruptedException {
+
+		for (int attempt = 0; attempt < 100; attempt++) {
+			try {
+				Lock lock = registry.obtain(lockKey);
+				lock.tryLock(lockWaitTimeMillis, TimeUnit.MILLISECONDS);
+				lock.unlock();
+				return lock;
+			}
+			catch (CannotAcquireLockException evicted) {
+				// The obtained lock was evicted from the cache before it could be used; retry with a fresh one.
+			}
+		}
+		throw new IllegalStateException("Could not obtain and lock '" + lockKey + "' after 100 attempts");
 	}
 
 	@Test
@@ -1068,6 +1083,150 @@ class RedisLockRegistryTests implements RedisContainerTest {
 			registry1.destroy();
 			registry2.destroy();
 		}
+	}
+
+	@Test
+	void notUsedLockIsEvictedOnCacheLimit() throws InterruptedException {
+		RedisLockRegistry registry = new RedisLockRegistry(redisConnectionFactory, this.registryKey);
+		registry.setRedisLockType(testRedisLockType);
+		registry.setCacheCapacity(2);
+
+		CountDownLatch lock1Latch = new CountDownLatch(1);
+		CountDownLatch furtherLocksLatch = new CountDownLatch(1);
+
+		Executors.newSingleThreadExecutor()
+				.execute(() -> {
+					DistributedLock lock1 = registry.obtain("lock1");
+					lock1.lock();
+					try {
+						furtherLocksLatch.countDown();
+						lock1Latch.await(10, TimeUnit.SECONDS);
+					}
+					catch (InterruptedException e) {
+						Thread.currentThread().interrupt();
+					}
+					finally {
+						lock1.unlock();
+					}
+				});
+
+		assertThat(furtherLocksLatch.await(10, TimeUnit.SECONDS)).isTrue();
+		// Two new locks to overcharge the cache.
+		// The 'lock2' is evicted by 'lock3' because it is not locked.
+		registry.obtain("lock2");
+		registry.obtain("lock3");
+
+		DistributedLock lock1 = registry.obtain("lock1");
+
+		// Cannot lock because 'lock1' is still locked by another thread
+		assertThat(lock1.tryLock(1, TimeUnit.SECONDS)).isFalse();
+
+		lock1Latch.countDown();
+
+		assertThatNoException().isThrownBy(() -> {
+			lock1.lock();
+			lock1.unlock();
+		});
+	}
+
+	@Test
+	void cannotAcquireLockExceptionOnCacheLimit() {
+		RedisLockRegistry registry = new RedisLockRegistry(redisConnectionFactory, this.registryKey);
+		registry.setRedisLockType(testRedisLockType);
+		registry.setCacheCapacity(2);
+
+		DistributedLock lock1 = registry.obtain("lock1");
+		lock1.lock();
+		try {
+			DistributedLock lock2 = registry.obtain("lock2");
+			lock2.lock();
+			try {
+				assertThatExceptionOfType(CannotAcquireLockException.class)
+						.isThrownBy(() -> registry.obtain("lock3"))
+						.withMessageStartingWith("There are already 2 unique Redis locks acquired in the application")
+						.withMessageEndingWith("Cannot obtain more at the moment.");
+			}
+			finally {
+				lock2.unlock();
+			}
+		}
+		finally {
+			lock1.unlock();
+		}
+		registry.destroy();
+	}
+
+	@Test
+	void unusedLockIsStale() {
+		RedisLockRegistry registry = new RedisLockRegistry(redisConnectionFactory, this.registryKey);
+		registry.setRedisLockType(testRedisLockType);
+		registry.setCacheCapacity(1);
+
+		DistributedLock lock1 = registry.obtain("lock1");
+		registry.obtain("lock2");
+
+		assertThatExceptionOfType(CannotAcquireLockException.class)
+				.isThrownBy(lock1::lock)
+				.havingCause()
+				.isInstanceOf(IllegalStateException.class)
+				.withMessageStartingWith("The lock 'lock1' was evicted from the exhausted cache.");
+		registry.destroy();
+	}
+
+	@Test
+	void testUnlockWhenInterruptedBlocksUntilKeyRemoved() throws Exception {
+		RedisLockRegistry registry = new RedisLockRegistry(redisConnectionFactory, this.registryKey);
+
+		CountDownLatch removalStarted = new CountDownLatch(1);
+		CountDownLatch allowRemovalToFinish = new CountDownLatch(1);
+
+		// Create an executor to freeze the removal process
+		registry.setExecutor(runnable -> new Thread(() -> {
+			try {
+				removalStarted.countDown();
+				allowRemovalToFinish.await();
+				runnable.run();
+			}
+			catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+			}
+		}).start());
+
+		Lock lock = registry.obtain("test");
+
+		// Spawn worker thread with error logging
+		Thread testThread = new Thread(() -> {
+			lock.lock();
+			try {
+				Thread.currentThread().interrupt();
+			}
+			finally {
+				lock.unlock();
+			}
+		});
+
+		testThread.start();
+
+		// Wait until the background thread reaches the frozen state
+		boolean started = removalStarted.await(5, TimeUnit.SECONDS);
+		assertThat(started).isTrue();
+
+		// Verify thread state - it should still be blocked in unlock()
+		assertThat(testThread.isAlive()).isTrue();
+
+		// Since testThread is blocked in unlock(), it still holds the local lock
+		Lock localUserLock = registry.obtain("test");
+		assertThat(localUserLock.tryLock()).isFalse();
+
+		// Allow executor thread to continue
+		allowRemovalToFinish.countDown();
+
+		testThread.join(1000);
+		assertThat(testThread.isAlive()).isFalse();
+
+		// Final check
+		assertThat(localUserLock.tryLock()).isTrue();
+		localUserLock.unlock();
 	}
 
 	private Long getExpire(RedisLockRegistry registry, String lockKey) {

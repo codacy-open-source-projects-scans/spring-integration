@@ -1,0 +1,15 @@
+    description = 'Spring Integration IP Support'
+    dependencies {
+        testImplementation project(':spring-integration-stream')
+        testImplementation project(':spring-integration-event')
+
+        testImplementation 'tools.jackson.core:jackson-databind'
+
+        testRuntimeOnly libs.com.esotericsoftware.kryo
+    }
+
+    tasks.withType(JavaForkOptions) {
+        jvmArgs '--add-opens', 'java.base/java.nio.channels.spi=ALL-UNNAMED',
+                '--add-opens', 'java.base/java.util=ALL-UNNAMED',
+				'-Djava.net.preferIPv4Stack=true'
+    }

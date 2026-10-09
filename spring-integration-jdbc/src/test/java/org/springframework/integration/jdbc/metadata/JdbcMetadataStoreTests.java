@@ -18,15 +18,14 @@ package org.springframework.integration.jdbc.metadata;
 
 import javax.sql.DataSource;
 
-import org.apache.derby.shared.common.error.StandardException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.condition.EnabledForJreRange;
-import org.junit.jupiter.api.condition.JRE;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContextException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.integration.test.util.TestUtils;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,13 +36,13 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 /**
  * @author Bojan Vukasovic
  * @author Artem Bilan
+ * @author Burak Kalayci
  *
  * @since 5.0
  */
 @SpringJUnitConfig
 @DirtiesContext // close at the end after class
 @Transactional
-@EnabledForJreRange(min = JRE.JAVA_21, disabledReason = "Derby 10.17")
 public class JdbcMetadataStoreTests {
 
 	@Autowired
@@ -119,9 +118,31 @@ public class JdbcMetadataStoreTests {
 			testApplicationContext.registerBean("jdbcMetadataStore", jdbcMetadataStore);
 			assertThatExceptionOfType(ApplicationContextException.class)
 					.isThrownBy(testApplicationContext::refresh)
-					.withRootCauseExactlyInstanceOf(StandardException.class)
-					.withStackTraceContaining("Table/View 'TEST_METADATA_STORE' does not exist");
+					.withStackTraceContaining("TEST_METADATA_STORE");
 		}
+	}
+
+	@Test
+	void metadataValueColumnRejectsNull() {
+		JdbcTemplate jdbcTemplate = new JdbcTemplate(this.dataSource);
+		assertThatExceptionOfType(DataIntegrityViolationException.class)
+				.isThrownBy(() -> jdbcTemplate.update(
+						"INSERT INTO INT_METADATA_STORE(METADATA_KEY, METADATA_VALUE, REGION) VALUES (?, ?, ?)",
+						"nullValued", null, "DEFAULT"));
+	}
+
+	@Test
+	void putIfAbsentRejectsNullValue() {
+		assertThatExceptionOfType(IllegalArgumentException.class)
+				.isThrownBy(() -> this.metadataStore.putIfAbsent("testKey", null))
+				.withMessageContaining("value");
+	}
+
+	@Test
+	void putRejectsNullValue() {
+		assertThatExceptionOfType(IllegalArgumentException.class)
+				.isThrownBy(() -> this.metadataStore.put("testKey", null))
+				.withMessageContaining("value");
 	}
 
 }

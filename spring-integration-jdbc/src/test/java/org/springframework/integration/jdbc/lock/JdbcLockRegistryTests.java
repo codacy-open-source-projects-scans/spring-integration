@@ -41,15 +41,16 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextException;
 import org.springframework.core.task.AsyncTaskExecutor;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.springframework.dao.CannotAcquireLockException;
 import org.springframework.integration.support.locks.DistributedLock;
 import org.springframework.integration.test.util.TestUtils;
-import org.springframework.integration.util.UUIDConverter;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.junit.jupiter.SpringJUnitConfig;
 import org.springframework.transaction.PlatformTransactionManager;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatNoException;
 
 /**
  * @author Dave Syer
@@ -85,7 +86,7 @@ class JdbcLockRegistryTests {
 
 	@BeforeEach
 	public void clear() {
-		this.registry.expireUnusedOlderThan(0);
+		this.registry.expireUnusedOlderThan(-10000);
 		this.client.close();
 	}
 
@@ -102,8 +103,7 @@ class JdbcLockRegistryTests {
 			}
 		}
 
-		Thread.sleep(10);
-		this.registry.expireUnusedOlderThan(0);
+		this.registry.expireUnusedOlderThan(-10000);
 		assertThat(TestUtils.<Map<String, Lock>>getPropertyValue(this.registry, "locks")).isEmpty();
 	}
 
@@ -138,7 +138,7 @@ class JdbcLockRegistryTests {
 			}
 		}
 
-		lockRegistry.expireUnusedOlderThan(0);
+		lockRegistry.expireUnusedOlderThan(-10000);
 		assertThat(TestUtils.<Map<String, Lock>>getPropertyValue(lockRegistry, "locks")).isEmpty();
 	}
 
@@ -159,7 +159,7 @@ class JdbcLockRegistryTests {
 			}
 		}
 
-		lockRegistry.expireUnusedOlderThan(0);
+		lockRegistry.expireUnusedOlderThan(-10000);
 		assertThat(TestUtils.<Map<String, Lock>>getPropertyValue(lockRegistry, "locks")).isEmpty();
 	}
 
@@ -466,7 +466,7 @@ class JdbcLockRegistryTests {
 					Thread.currentThread().interrupt();
 				}
 				String keyId = "foo:" + finalI;
-				remainLockCheckQueue.offer(toUUID(keyId));
+				remainLockCheckQueue.offer(keyId);
 				Lock obtain = registry.obtain(keyId);
 				obtain.lock();
 				obtain.unlock();
@@ -503,7 +503,7 @@ class JdbcLockRegistryTests {
 		Lock obtainLock0 = registry.obtain(REMAIN_DUMMY_LOCK_KEY);
 		obtainLock0.lock();
 		obtainLock0.unlock();
-		remainLockCheckQueue.offer(toUUID(REMAIN_DUMMY_LOCK_KEY));
+		remainLockCheckQueue.offer(REMAIN_DUMMY_LOCK_KEY);
 
 		for (int i = dummyLockCnt; i < threadCnt + dummyLockCnt; i++) {
 			int finalI = i;
@@ -516,7 +516,7 @@ class JdbcLockRegistryTests {
 					Thread.currentThread().interrupt();
 				}
 				String keyId = "foo:" + finalI;
-				remainLockCheckQueue.offer(toUUID(keyId));
+				remainLockCheckQueue.offer(keyId);
 				Lock obtain = registry.obtain(keyId);
 				obtain.lock();
 				obtain.unlock();
@@ -544,18 +544,16 @@ class JdbcLockRegistryTests {
 
 		registry.obtain("foo:4");
 
-		assertThat(getRegistryLocks(registry)).hasSize(3);
-		assertThat(getRegistryLocks(registry)).containsKeys(toUUID("foo:2"),
-				toUUID("foo:3"),
-				toUUID("foo:4"));
+		assertThat(getRegistryLocks(registry))
+				.hasSize(3)
+				.containsKeys("foo:2", "foo:3", "foo:4");
 
 		//capacity 3->4
 		registry.setCacheCapacity(capacityCnt);
 		registry.obtain("foo:5");
-		assertThat(getRegistryLocks(registry)).hasSize(4);
-		assertThat(getRegistryLocks(registry)).containsKeys(toUUID("foo:3"),
-				toUUID("foo:4"),
-				toUUID("foo:5"));
+		assertThat(getRegistryLocks(registry))
+				.hasSize(4)
+				.containsKeys("foo:3", "foo:4", "foo:5");
 	}
 
 	@Test
@@ -621,6 +619,7 @@ class JdbcLockRegistryTests {
 		client.afterPropertiesSet();
 		client.afterSingletonsInstantiated();
 		JdbcLockRegistry registry = new JdbcLockRegistry(client) {
+
 			@Override
 			protected String pathFor(String input) {
 				return input;
@@ -634,12 +633,169 @@ class JdbcLockRegistryTests {
 		assertThat(lockPath).isEqualTo(lockKey);
 	}
 
-	private static Map<String, Lock> getRegistryLocks(JdbcLockRegistry registry) {
-		return TestUtils.getPropertyValue(registry, "locks");
+	@Test
+	void notUsedLockIsEvictedOnCacheLimit() throws InterruptedException {
+		DefaultLockRepository client = new DefaultLockRepository(dataSource);
+		client.setApplicationContext(this.context);
+		client.afterPropertiesSet();
+		client.afterSingletonsInstantiated();
+		JdbcLockRegistry registry = new JdbcLockRegistry(client);
+		registry.setCacheCapacity(2);
+
+		CountDownLatch lock1Latch = new CountDownLatch(1);
+		CountDownLatch furtherLocksLatch = new CountDownLatch(1);
+
+		Executors.newSingleThreadExecutor()
+				.execute(() -> {
+					DistributedLock lock1 = registry.obtain("lock1");
+					lock1.lock();
+					try {
+						furtherLocksLatch.countDown();
+						lock1Latch.await(10, TimeUnit.SECONDS);
+					}
+					catch (InterruptedException e) {
+						Thread.currentThread().interrupt();
+					}
+					finally {
+						lock1.unlock();
+					}
+				});
+
+		assertThat(furtherLocksLatch.await(10, TimeUnit.SECONDS)).isTrue();
+		// Two new locks to overcharge the cache.
+		// The 'lock2' is evicted by 'lock3' because it is not locked.
+		registry.obtain("lock2");
+		registry.obtain("lock3");
+
+		DistributedLock lock1 = registry.obtain("lock1");
+
+		// Cannot lock because 'lock1' is still locked by another thread
+		assertThat(lock1.tryLock(1, TimeUnit.SECONDS)).isFalse();
+
+		lock1Latch.countDown();
+
+		assertThatNoException().isThrownBy(() -> {
+			lock1.lock();
+			lock1.unlock();
+		});
 	}
 
-	private static String toUUID(String key) {
-		return UUIDConverter.getUUID(key).toString();
+	@Test
+	void cannotAcquireLockExceptionOnCacheLimit() {
+		DefaultLockRepository client = new DefaultLockRepository(dataSource);
+		client.setApplicationContext(this.context);
+		client.afterPropertiesSet();
+		client.afterSingletonsInstantiated();
+		JdbcLockRegistry registry = new JdbcLockRegistry(client);
+		registry.setCacheCapacity(2);
+
+		DistributedLock lock1 = registry.obtain("lock1");
+		lock1.lock();
+		try {
+			DistributedLock lock2 = registry.obtain("lock2");
+			lock2.lock();
+			try {
+				assertThatExceptionOfType(CannotAcquireLockException.class)
+						.isThrownBy(() -> registry.obtain("lock3"))
+						.withMessageStartingWith("There are already 2 unique JDBC locks acquired in the application")
+						.withMessageEndingWith("Cannot obtain more at the moment.");
+			}
+			finally {
+				lock2.unlock();
+			}
+		}
+		finally {
+			lock1.unlock();
+		}
+	}
+
+	@Test
+	void unusedLockIsStale() {
+		DefaultLockRepository client = new DefaultLockRepository(dataSource);
+		client.setApplicationContext(this.context);
+		client.afterPropertiesSet();
+		client.afterSingletonsInstantiated();
+		JdbcLockRegistry registry = new JdbcLockRegistry(client);
+		registry.setCacheCapacity(1);
+
+		DistributedLock lock1 = registry.obtain("lock1");
+		registry.obtain("lock2");
+
+		assertThatExceptionOfType(CannotAcquireLockException.class)
+				.isThrownBy(lock1::lock)
+				.havingCause()
+				.isInstanceOf(IllegalStateException.class)
+				.withMessageStartingWith("The lock 'lock1' was evicted from the exhausted cache due to its unused period for");
+	}
+
+	@Test
+	void shrinkingCacheCapacityEvictsUnusedEntries() {
+		DefaultLockRepository client = new DefaultLockRepository(dataSource);
+		client.setApplicationContext(this.context);
+		client.afterPropertiesSet();
+		client.afterSingletonsInstantiated();
+		JdbcLockRegistry registry = new JdbcLockRegistry(client);
+		registry.setCacheCapacity(2);
+
+		DistributedLock lock1 = registry.obtain("lock1");
+		lock1.lock();
+		try {
+			DistributedLock lock2 = registry.obtain("lock2");
+			registry.setCacheCapacity(1);
+			assertThatExceptionOfType(CannotAcquireLockException.class)
+					.isThrownBy(lock2::lock)
+					.havingCause()
+					.isInstanceOf(IllegalStateException.class)
+					.withMessageStartingWith(
+							"The lock 'lock2' was evicted from the exhausted cache due to its unused period for");
+		}
+		finally {
+			lock1.unlock();
+		}
+	}
+
+	@Test
+	void obtainDoesNotEvictCurrentlyHeldLockOfRequestedKey() {
+		DefaultLockRepository client = new DefaultLockRepository(dataSource);
+		client.setApplicationContext(this.context);
+		client.afterPropertiesSet();
+		client.afterSingletonsInstantiated();
+		JdbcLockRegistry registry = new JdbcLockRegistry(client);
+		registry.setCacheCapacity(2);
+
+		DistributedLock lock1 = registry.obtain("lock1");
+		lock1.lock();
+		try {
+			DistributedLock lock2 = registry.obtain("lock2");
+			lock2.lock();
+			try {
+				// Shrinking the capacity below the number of currently held locks forces
+				// the next `obtain` for an already-cached, held key to see `size() > cacheCapacity`.
+				registry.setCacheCapacity(1);
+
+				Map<String, Lock> registryLocks = getRegistryLocks(registry);
+
+				assertThat(registryLocks).containsKeys("lock1", "lock2");
+
+				assertThat(registry.obtain("lock1")).isSameAs(lock1);
+
+				assertThat(registryLocks).containsKeys("lock1", "lock2");
+
+				assertThatNoException().isThrownBy(lock1::lock);
+
+				lock1.unlock();
+			}
+			finally {
+				lock2.unlock();
+			}
+		}
+		finally {
+			lock1.unlock();
+		}
+	}
+
+	private static Map<String, Lock> getRegistryLocks(JdbcLockRegistry registry) {
+		return TestUtils.getPropertyValue(registry, "locks");
 	}
 
 }

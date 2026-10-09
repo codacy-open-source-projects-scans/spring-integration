@@ -17,11 +17,13 @@
 package org.springframework.integration.file.inbound;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Comparator;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import org.springframework.integration.file.FileHeaders;
 import org.springframework.integration.file.FileLocker;
@@ -30,6 +32,7 @@ import org.springframework.messaging.Message;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
+import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
 import static org.mockito.ArgumentMatchers.isA;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -41,6 +44,7 @@ import static org.mockito.Mockito.when;
  * @author Mark Fisher
  * @author Artem Bilan
  * @author Gary Russell
+ * @author Rene Choi
  */
 class FileReadingMessageSourceTests implements TestApplicationContextAware {
 
@@ -54,15 +58,17 @@ class FileReadingMessageSourceTests implements TestApplicationContextAware {
 
 	private final Comparator<File> comparator = mock();
 
-	public void prepResource() {
+	public void prepResource() throws IOException {
 		when(inputDirectoryMock.toPath()).thenReturn(Path.of("[dir]"));
+		when(inputDirectoryMock.getCanonicalFile()).thenReturn(inputDirectoryMock);
 		when(fileMock.toPath()).thenReturn(Path.of("[dir]/fileMock"));
 		when(fileMock.getAbsolutePath()).thenReturn("[dir]/fileMock");
+		when(fileMock.getCanonicalFile()).thenReturn(fileMock);
 		when(locker.lock(isA(File.class))).thenReturn(true);
 	}
 
 	@BeforeEach
-	public void initialize() {
+	public void initialize() throws IOException {
 		prepResource();
 		this.source = new FileReadingMessageSource(comparator);
 		this.source.setDirectory(inputDirectoryMock);
@@ -90,9 +96,10 @@ class FileReadingMessageSourceTests implements TestApplicationContextAware {
 	}
 
 	@Test
-	public void scanEachPoll() {
+	public void scanEachPoll() throws IOException {
 		File anotherFileMock = mock();
 		when(anotherFileMock.toPath()).thenReturn(Path.of("[dir]/anotherFileMock"));
+		when(anotherFileMock.getCanonicalFile()).thenReturn(anotherFileMock);
 		when(inputDirectoryMock.listFiles()).thenReturn(new File[] {fileMock, anotherFileMock});
 		source.setScanEachPoll(true);
 		assertThat(source.receive()).isNotNull();
@@ -136,13 +143,16 @@ class FileReadingMessageSourceTests implements TestApplicationContextAware {
 	}
 
 	@Test
-	public void orderedReception() {
+	public void orderedReception() throws IOException {
 		File file1 = mock();
 		when(file1.toPath()).thenReturn(Path.of("[dir]/file1"));
+		when(file1.getCanonicalFile()).thenReturn(file1);
 		File file2 = mock();
 		when(file2.toPath()).thenReturn(Path.of("[dir]/file2"));
+		when(file2.getCanonicalFile()).thenReturn(file2);
 		File file3 = mock();
 		when(file3.toPath()).thenReturn(Path.of("[dir]/file3"));
+		when(file3.getCanonicalFile()).thenReturn(file3);
 
 		// record the comparator to reverse order the files
 		when(comparator.compare(file1, file2)).thenReturn(1);
@@ -155,6 +165,33 @@ class FileReadingMessageSourceTests implements TestApplicationContextAware {
 		assertThat(source.receive().getPayload()).isSameAs(file1);
 		assertThat(source.receive()).isNull();
 		verify(inputDirectoryMock, times(2)).listFiles();
+	}
+
+	@Test
+	public void startIsRetriedAfterDirectoryCreationFailure(@TempDir File tempDir) throws IOException {
+		File blocker = new File(tempDir, "blocker");
+		assertThat(blocker.createNewFile()).isTrue();
+		File inputDirectory = new File(blocker, "input");
+
+		FileReadingMessageSource testSource = new FileReadingMessageSource();
+		testSource.setDirectory(inputDirectory);
+		testSource.setBeanFactory(TEST_INTEGRATION_CONTEXT);
+		testSource.afterPropertiesSet();
+
+		assertThatIllegalStateException()
+				.isThrownBy(testSource::start)
+				.withMessageContaining("Cannot create directory or its parents");
+
+		assertThat(testSource.isRunning()).isFalse();
+
+		assertThat(blocker.delete()).isTrue();
+
+		testSource.start();
+
+		assertThat(testSource.isRunning()).isTrue();
+		assertThat(inputDirectory).isDirectory();
+
+		testSource.stop();
 	}
 
 }

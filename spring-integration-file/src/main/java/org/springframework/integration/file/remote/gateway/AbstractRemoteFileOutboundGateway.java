@@ -23,6 +23,8 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -52,6 +54,7 @@ import org.springframework.integration.file.remote.RemoteFileUtils;
 import org.springframework.integration.file.remote.session.Session;
 import org.springframework.integration.file.remote.session.SessionFactory;
 import org.springframework.integration.file.support.FileExistsMode;
+import org.springframework.integration.file.support.FileUtils;
 import org.springframework.integration.handler.AbstractReplyProducingMessageHandler;
 import org.springframework.integration.handler.ExpressionEvaluatingMessageProcessor;
 import org.springframework.integration.handler.MessageProcessor;
@@ -76,6 +79,7 @@ import org.springframework.util.StringUtils;
  * @author Artem Bilan
  * @author Mauro Molinari
  * @author Jooyoung Pyoung
+ * @author Jiwoo Lee
  *
  * @since 2.1
  */
@@ -1170,8 +1174,9 @@ public abstract class AbstractRemoteFileOutboundGateway<F> extends AbstractReply
 			}
 			fileInfo = files[0];
 		}
-		final File localFile =
-				new File(generateLocalDirectory(message, remoteDir), generateLocalFileName(message, remoteFilename));
+		File localFile =
+				FileUtils.newFileInDirectoryIfValid(generateLocalDirectory(message, remoteDir),
+						generateLocalFileName(message, remoteFilename));
 		FileExistsMode existsMode = resolveFileExistsMode(message);
 		boolean appending = FileExistsMode.APPEND.equals(existsMode);
 		boolean exists = localFile.exists();
@@ -1426,7 +1431,12 @@ public abstract class AbstractRemoteFileOutboundGateway<F> extends AbstractReply
 		File localDir = ExpressionUtils.expressionToFile(this.localDirectoryExpression, evaluationContext, message,
 				"Local Directory");
 		if (!localDir.exists()) {
-			Assert.isTrue(localDir.mkdirs(), () -> "Failed to make local directory: " + localDir);
+			try {
+				Files.createDirectories(localDir.toPath());
+			}
+			catch (IOException | InvalidPathException ex) {
+				throw new IllegalArgumentException("Failed to make local directory: " + localDir, ex);
+			}
 		}
 		return localDir;
 	}

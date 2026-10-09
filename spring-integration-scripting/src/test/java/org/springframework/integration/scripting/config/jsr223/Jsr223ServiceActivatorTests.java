@@ -44,6 +44,7 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
  * @author David Turanski
  * @author Gunnar Hillert
  * @author Artem Bilan
+ * @author Glenn Renfro
  *
  * @since 2.0
  */

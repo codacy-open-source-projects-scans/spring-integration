@@ -20,6 +20,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.InvalidPathException;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +33,8 @@ import java.util.stream.Stream;
 
 import org.apache.commons.io.FileUtils;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 import org.springframework.expression.EvaluationContext;
@@ -47,7 +50,9 @@ import org.springframework.messaging.MessagingException;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
+import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.assertj.core.api.Assertions.assertThatIllegalStateException;
+import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.mock;
 
 /**
@@ -55,6 +60,7 @@ import static org.mockito.Mockito.mock;
  * @author Artem Bilan
  * @author Venil Noronha
  * @author Glenn Renfro
+ * @author Rene Choi
  *
  * @since 4.0.4
  *
@@ -299,11 +305,120 @@ public class AbstractRemoteFileSynchronizerTests implements TestApplicationConte
 		assertThat(localDir.list()).contains("dir1", "dir2");
 	}
 
-	private AbstractInboundFileSynchronizingMessageSource<String> createSource(AtomicInteger count) {
+	@Test
+	public void startIsRetriedWhenLocalDirectoryIsNotUsable(@TempDir File tempDir) throws IOException {
+		AbstractInboundFileSynchronizingMessageSource<String> source = createSource(new AtomicInteger());
+		File localDirectory = new File(tempDir, "local");
+		source.setLocalDirectory(localDirectory);
+		source.afterPropertiesSet();
+
+		// The local directory is replaced by a regular file after the initialization.
+		assertThat(localDirectory.delete()).isTrue();
+		assertThat(localDirectory.createNewFile()).isTrue();
+
+		assertThatIllegalArgumentException()
+				.isThrownBy(source::start)
+				.withMessageContaining("does not point to a directory");
+
+		assertThat(source.isRunning()).isFalse();
+
+		assertThat(localDirectory.delete()).isTrue();
+
+		source.start();
+
+		assertThat(source.isRunning()).isTrue();
+		assertThat(localDirectory).isDirectory();
+
+		source.stop();
+	}
+
+	@Test
+	public void checkPathThrowsOnDirectoryTraversal(@TempDir File localDir) {
+		verifyDirectoryNotTheSame(localDir, "../base/escaped.txt");
+	}
+
+	@Test
+	public void checkPathOnDirectoryMidLineTraversal(@TempDir File localDir) {
+		verifyDirectoryNotTheSame(localDir, "base/../escaped.txt");
+	}
+
+	private static AbstractInboundFileSynchronizer<String> getAbstractInboundFileSynchronizer(String fileName) {
+		StringSession session = mock(StringSession.class);
+		given(session.list("remoteDir")).willReturn(new String[] {fileName});
+		given(session.getHostPort()).willReturn("mock:1234");
+
+		AbstractInboundFileSynchronizer<String> sync = createSynchronizerWithSession(session);
+		sync.setRemoteDirectory("remoteDir");
+		return sync;
+	}
+
+	@Test
+	public void checkPathThrowsOnDirectoryExtendMidLineTraversal(@TempDir File localDir) {
+		verifyDirectoryNotTheSame(localDir, "base/subdir/../../../../escaped.txt");
+	}
+
+	@Test
+	@EnabledOnOs(OS.WINDOWS)
+	void checkPathThrowsOnAbsoluteDirectoryTraversalLinuxMacWindows(@TempDir File localDir) {
+		verifyDirectoryNotTheSame(localDir, "C:\\projects\\data\\file.txt");
+	}
+
+	@Test
+	@EnabledOnOs(OS.WINDOWS)
+	void notTraversalOnCurrentDirWindows() {
+		AbstractInboundFileSynchronizer<String> sync = getAbstractInboundFileSynchronizer("build\\tmp\\file.txt");
+
+		sync.synchronizeToLocalDirectory(new File(""));
+
+		assertThat(new File("build\\tmp\\file.txt")).exists();
+	}
+
+	@Test
+	@EnabledOnOs({OS.LINUX, OS.MAC})
+	void checkPathThrowsOnAbsoluteDirectoryTraversalLinuxMac(@TempDir File localDir) {
+		verifyDirectoryNotTheSame(localDir, "/base/escaped.txt");
+	}
+
+	private static void verifyDirectoryNotTheSame(File localDir, String fileName) {
+		AbstractInboundFileSynchronizer<String> sync = getAbstractInboundFileSynchronizer(fileName);
+
+		assertThatExceptionOfType(MessagingException.class)
+				.isThrownBy(() -> sync.synchronizeToLocalDirectory(localDir))
+				.withStackTraceContaining("trying to leave the target output directory")
+				.withRootCauseInstanceOf(InvalidPathException.class);
+	}
+
+	private static AbstractInboundFileSynchronizer<String> createSynchronizerWithSession(StringSession session) {
+		return new AbstractInboundFileSynchronizer<>(() -> session) {
+
+			@Override
+			protected boolean isFile(String file) {
+				return true;
+			}
+
+			@Override
+			protected String getFilename(String file) {
+				return file;
+			}
+
+			@Override
+			protected long getModified(String file) {
+				return 0;
+			}
+
+			@Override
+			protected String protocol() {
+				return "mock";
+			}
+
+		};
+	}
+
+	private static AbstractInboundFileSynchronizingMessageSource<String> createSource(AtomicInteger count) {
 		return createSource(createLimitingSynchronizer(count));
 	}
 
-	private AbstractInboundFileSynchronizingMessageSource<String> createSource(
+	private static AbstractInboundFileSynchronizingMessageSource<String> createSource(
 			AbstractInboundFileSynchronizer<String> sync) {
 
 		AbstractInboundFileSynchronizingMessageSource<String> source =
@@ -323,7 +438,7 @@ public class AbstractRemoteFileSynchronizerTests implements TestApplicationConte
 		return source;
 	}
 
-	private AbstractInboundFileSynchronizer<String> createLimitingSynchronizer(final AtomicInteger count) {
+	private static AbstractInboundFileSynchronizer<String> createLimitingSynchronizer(final AtomicInteger count) {
 		SessionFactory<String> sf = new StringSessionFactory();
 		AbstractInboundFileSynchronizer<String> sync = new AbstractInboundFileSynchronizer<>(sf) {
 
@@ -454,7 +569,7 @@ public class AbstractRemoteFileSynchronizerTests implements TestApplicationConte
 
 		@Override
 		public String getHostPort() {
-			return "mock:6666";
+			return "mock:1234";
 		}
 
 	}

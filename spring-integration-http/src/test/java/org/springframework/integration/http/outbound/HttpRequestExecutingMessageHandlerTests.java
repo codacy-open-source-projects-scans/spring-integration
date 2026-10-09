@@ -28,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 import javax.xml.transform.Source;
 
@@ -37,7 +38,6 @@ import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Sinks;
 import reactor.test.StepVerifier;
 
-import org.springframework.beans.DirectFieldAccessor;
 import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.support.ClassPathXmlApplicationContext;
 import org.springframework.core.ParameterizedTypeReference;
@@ -47,6 +47,7 @@ import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.ClientHttpRequest;
@@ -60,23 +61,24 @@ import org.springframework.integration.test.support.TestApplicationContextAware;
 import org.springframework.integration.test.util.TestUtils;
 import org.springframework.messaging.Message;
 import org.springframework.messaging.MessageChannel;
+import org.springframework.messaging.MessageHandlingException;
 import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.PollableChannel;
 import org.springframework.messaging.support.GenericMessage;
+import org.springframework.mock.http.client.MockClientHttpRequest;
 import org.springframework.mock.http.client.MockClientHttpResponse;
 import org.springframework.util.MultiValueMap;
-import org.springframework.web.client.RequestCallback;
-import org.springframework.web.client.ResourceAccessException;
-import org.springframework.web.client.ResponseExtractor;
 import org.springframework.web.client.RestClient;
 import org.springframework.web.client.RestClientException;
-import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.DefaultUriBuilderFactory;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatException;
+import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatIllegalArgumentException;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyMap;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -89,6 +91,8 @@ import static org.mockito.Mockito.when;
  * @author Florian Schöffl
  * @author Glenn Renfro
  * @author Arun Sethumadhavan
+ * @author Burak Kalayci
+ * @author Hyun Lee
  */
 public class HttpRequestExecutingMessageHandlerTests implements TestApplicationContextAware {
 
@@ -109,10 +113,9 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 
 	@Test
 	public void simpleStringKeyStringValueFormData() {
+		CapturingRestClient capturing = new CapturingRestClient();
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
-				"https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
+				"https://www.springsource.org/spring-integration", capturing.client());
 		handler.setHttpMethod(HttpMethod.POST);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -132,7 +135,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(message))
 				.withStackTraceContaining("intentional");
 
-		HttpEntity<?> request = template.lastRequestEntity.get();
+		HttpEntity<?> request = capturing.lastRequestEntity();
 		Object body = request.getBody();
 		assertThat(request.getHeaders().getContentType()).isNotNull();
 		assertThat(body).isInstanceOf(MultiValueMap.class);
@@ -147,10 +150,9 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 
 	@Test
 	public void simpleStringKeyObjectValueFormData() {
+		CapturingRestClient capturing = new CapturingRestClient();
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
-				"https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
+				"https://www.springsource.org/spring-integration", capturing.client());
 		handler.setHttpMethod(HttpMethod.POST);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -166,7 +168,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(message))
 				.withStackTraceContaining("intentional");
 
-		HttpEntity<?> request = template.lastRequestEntity.get();
+		HttpEntity<?> request = capturing.lastRequestEntity();
 		Object body = request.getBody();
 		assertThat(body instanceof MultiValueMap<?, ?>).isTrue();
 		MultiValueMap<?, ?> map = (MultiValueMap<?, ?>) body;
@@ -178,10 +180,9 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 
 	@Test
 	public void simpleObjectKeyObjectValueFormData() {
+		CapturingRestClient capturing = new CapturingRestClient();
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
-				"https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
+				"https://www.springsource.org/spring-integration", capturing.client());
 		handler.setHttpMethod(HttpMethod.POST);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -197,7 +198,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(message))
 				.withStackTraceContaining("intentional");
 
-		HttpEntity<?> request = template.lastRequestEntity.get();
+		HttpEntity<?> request = capturing.lastRequestEntity();
 		Object body = request.getBody();
 		assertThat(body instanceof Map<?, ?>).isTrue();
 		Map<?, ?> map = (Map<?, ?>) body;
@@ -209,10 +210,9 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 
 	@Test
 	public void stringKeyStringArrayValueFormData() {
+		CapturingRestClient capturing = new CapturingRestClient();
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
-				"https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
+				"https://www.springsource.org/spring-integration", capturing.client());
 		handler.setHttpMethod(HttpMethod.POST);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -227,7 +227,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(message))
 				.withStackTraceContaining("intentional");
 
-		HttpEntity<?> request = template.lastRequestEntity.get();
+		HttpEntity<?> request = capturing.lastRequestEntity();
 		Object body = request.getBody();
 		assertThat(body instanceof MultiValueMap<?, ?>).isTrue();
 		MultiValueMap<?, ?> map = (MultiValueMap<?, ?>) body;
@@ -254,10 +254,9 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 
 	@Test
 	public void stringKeyPrimitiveArrayValueMixedFormData() {
+		CapturingRestClient capturing = new CapturingRestClient();
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
-				"https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
+				"https://www.springsource.org/spring-integration", capturing.client());
 		handler.setHttpMethod(HttpMethod.POST);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -272,7 +271,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(message))
 				.withStackTraceContaining("intentional");
 
-		HttpEntity<?> request = template.lastRequestEntity.get();
+		HttpEntity<?> request = capturing.lastRequestEntity();
 		Object body = request.getBody();
 		assertThat(body instanceof MultiValueMap<?, ?>).isTrue();
 		MultiValueMap<?, ?> map = (MultiValueMap<?, ?>) body;
@@ -302,10 +301,9 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 
 	@Test
 	public void stringKeyNullArrayValueMixedFormData() {
+		CapturingRestClient capturing = new CapturingRestClient();
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
-				"https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
+				"https://www.springsource.org/spring-integration", capturing.client());
 		handler.setHttpMethod(HttpMethod.POST);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -318,7 +316,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(message))
 				.withStackTraceContaining("intentional");
 
-		HttpEntity<?> request = template.lastRequestEntity.get();
+		HttpEntity<?> request = capturing.lastRequestEntity();
 		Object body = request.getBody();
 		assertThat(body instanceof MultiValueMap<?, ?>).isTrue();
 		MultiValueMap<?, ?> map = (MultiValueMap<?, ?>) body;
@@ -343,10 +341,9 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 	 */
 	@Test
 	public void stringKeyNullCollectionValueMixedFormDataString() {
+		CapturingRestClient capturing = new CapturingRestClient();
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
-				"https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
+				"https://www.springsource.org/spring-integration", capturing.client());
 		handler.setHttpMethod(HttpMethod.POST);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -363,7 +360,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(message))
 				.withStackTraceContaining("intentional");
 
-		HttpEntity<?> request = template.lastRequestEntity.get();
+		HttpEntity<?> request = capturing.lastRequestEntity();
 		Object body = request.getBody();
 		assertThat(body instanceof MultiValueMap<?, ?>).isTrue();
 		MultiValueMap<?, ?> map = (MultiValueMap<?, ?>) body;
@@ -387,10 +384,9 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 	 */
 	@Test
 	public void stringKeyNullCollectionValueMixedFormDataObject() {
+		CapturingRestClient capturing = new CapturingRestClient();
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
-				"https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
+				"https://www.springsource.org/spring-integration", capturing.client());
 		handler.setHttpMethod(HttpMethod.POST);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -407,7 +403,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(message))
 				.withStackTraceContaining("intentional");
 
-		HttpEntity<?> request = template.lastRequestEntity.get();
+		HttpEntity<?> request = capturing.lastRequestEntity();
 		Object body = request.getBody();
 		assertThat(body instanceof MultiValueMap<?, ?>).isTrue();
 		MultiValueMap<?, ?> map = (MultiValueMap<?, ?>) body;
@@ -427,10 +423,9 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 
 	@Test
 	public void stringKeyStringCollectionValueFormData() {
+		CapturingRestClient capturing = new CapturingRestClient();
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
-				"https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
+				"https://www.springsource.org/spring-integration", capturing.client());
 		handler.setHttpMethod(HttpMethod.POST);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -447,7 +442,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(message))
 				.withStackTraceContaining("intentional");
 
-		HttpEntity<?> request = template.lastRequestEntity.get();
+		HttpEntity<?> request = capturing.lastRequestEntity();
 		Object body = request.getBody();
 		assertThat(body instanceof MultiValueMap<?, ?>).isTrue();
 		MultiValueMap<?, ?> map = (MultiValueMap<?, ?>) body;
@@ -469,10 +464,9 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 
 	@Test
 	public void stringKeyObjectCollectionValueFormData() {
+		CapturingRestClient capturing = new CapturingRestClient();
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
-				"https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
+				"https://www.springsource.org/spring-integration", capturing.client());
 		handler.setHttpMethod(HttpMethod.POST);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -489,7 +483,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(message))
 				.withStackTraceContaining("intentional");
 
-		HttpEntity<?> request = template.lastRequestEntity.get();
+		HttpEntity<?> request = capturing.lastRequestEntity();
 		Object body = request.getBody();
 		assertThat(body instanceof MultiValueMap<?, ?>).isTrue();
 		MultiValueMap<?, ?> map = (MultiValueMap<?, ?>) body;
@@ -511,10 +505,9 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 
 	@Test
 	public void nameOnlyWithNullValues() {
+		CapturingRestClient capturing = new CapturingRestClient();
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
-				"https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
+				"https://www.springsource.org/spring-integration", capturing.client());
 		handler.setHttpMethod(HttpMethod.POST);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -528,7 +521,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(message))
 				.withStackTraceContaining("intentional");
 
-		HttpEntity<?> request = template.lastRequestEntity.get();
+		HttpEntity<?> request = capturing.lastRequestEntity();
 		Object body = request.getBody();
 		assertThat(body instanceof MultiValueMap<?, ?>).isTrue();
 		MultiValueMap<?, ?> map = (MultiValueMap<?, ?>) body;
@@ -545,10 +538,9 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 
 	@Test
 	public void contentAsByteArray() {
+		CapturingRestClient capturing = new CapturingRestClient();
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
-				"https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
+				"https://www.springsource.org/spring-integration", capturing.client());
 		handler.setHttpMethod(HttpMethod.POST);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -560,7 +552,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(message))
 				.withStackTraceContaining("intentional");
 
-		HttpEntity<?> request = template.lastRequestEntity.get();
+		HttpEntity<?> request = capturing.lastRequestEntity();
 		Object body = request.getBody();
 		assertThat(body).asInstanceOf(InstanceOfAssertFactories.BYTE_ARRAY).isEqualTo(bytes);
 		assertThat(request.getHeaders().getContentType()).isEqualTo(MediaType.APPLICATION_OCTET_STREAM);
@@ -568,10 +560,9 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 
 	@Test
 	public void contentAsXmlSource() {
+		CapturingRestClient capturing = new CapturingRestClient();
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
-				"https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
+				"https://www.springsource.org/spring-integration", capturing.client());
 		handler.setHttpMethod(HttpMethod.POST);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -582,7 +573,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(message))
 				.withStackTraceContaining("intentional");
 
-		HttpEntity<?> request = template.lastRequestEntity.get();
+		HttpEntity<?> request = capturing.lastRequestEntity();
 		Object body = request.getBody();
 		assertThat(body).isInstanceOf(Source.class);
 		assertThat(request.getHeaders().getContentType()).isEqualTo(MediaType.TEXT_XML);
@@ -594,8 +585,6 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
 				"https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
 		handler.setHttpMethod(HttpMethod.GET);
 		handler.setExtractPayload(true);
 		setBeanFactory(handler);
@@ -604,8 +593,6 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 		// should not see a warn message since 'setExtractPayload' is not set explicitly
 
 		handler = new HttpRequestExecutingMessageHandler("https://www.springsource.org/spring-integration");
-		template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
 		handler.setHttpMethod(HttpMethod.GET);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -613,8 +600,6 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 		// should not see a warn message since HTTP method is not GET
 
 		handler = new HttpRequestExecutingMessageHandler("https://www.springsource.org/spring-integration");
-		template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
 		handler.setHttpMethod(HttpMethod.POST);
 		handler.setExtractPayload(true);
 		setBeanFactory(handler);
@@ -624,10 +609,10 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 	@Test
 	public void contentTypeIsNotSetForGetAndHeadRequest() {
 		// GET
+		CapturingRestClient capturing = new CapturingRestClient();
 		HttpRequestExecutingMessageHandler handler =
-				new HttpRequestExecutingMessageHandler("https://www.springsource.org/spring-integration");
-		MockRestTemplate template = new MockRestTemplate();
-		setRestTemplateForTesting(handler, template);
+				new HttpRequestExecutingMessageHandler("https://www.springsource.org/spring-integration",
+						capturing.client());
 		handler.setHttpMethod(HttpMethod.GET);
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
@@ -636,7 +621,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(MessageBuilder.withPayload(mock(Source.class)).build()))
 				.withStackTraceContaining("intentional");
 
-		assertThat(template.lastRequestEntity.get().getHeaders().getContentType()).isNull();
+		assertThat(capturing.lastRequestEntity().getHeaders().getContentType()).isNull();
 
 		//HEAD
 		handler.setHttpMethod(HttpMethod.HEAD);
@@ -645,7 +630,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(MessageBuilder.withPayload(mock(Source.class)).build()))
 				.withStackTraceContaining("intentional");
 
-		assertThat(template.lastRequestEntity.get().getHeaders().getContentType()).isNull();
+		assertThat(capturing.lastRequestEntity().getHeaders().getContentType()).isNull();
 
 		//DELETE
 		handler.setHttpMethod(HttpMethod.DELETE);
@@ -654,7 +639,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(MessageBuilder.withPayload(mock(Source.class)).build()))
 				.withStackTraceContaining("intentional");
 
-		assertThat(template.lastRequestEntity.get().getHeaders().getContentType()).isEqualTo(MediaType.TEXT_XML);
+		assertThat(capturing.lastRequestEntity().getHeaders().getContentType()).isEqualTo(MediaType.TEXT_XML);
 
 		//TRACE
 		handler.setHttpMethod(HttpMethod.TRACE);
@@ -663,7 +648,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 				.isThrownBy(() -> handler.handleMessage(MessageBuilder.withPayload(mock(Source.class)).build()))
 				.withStackTraceContaining("intentional");
 
-		assertThat(template.lastRequestEntity.get().getHeaders().getContentType()).isNull();
+		assertThat(capturing.lastRequestEntity().getHeaders().getContentType()).isNull();
 	}
 
 	@Test
@@ -718,14 +703,50 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 	}
 
 	@Test
+	public void defaultStatusHandlerAppliesOnlyToMatchingPredicate() throws IOException {
+		MockClientHttpRequest clientRequest = new MockClientHttpRequest();
+		clientRequest.setResponse(new MockClientHttpResponse(new byte[0], HttpStatus.NOT_FOUND));
+		ClientHttpRequestFactory requestFactory = (uri, httpMethod) -> clientRequest;
+
+		AtomicReference<HttpStatusCode> handledStatus = new AtomicReference<>();
+
+		HttpRequestExecutingMessageHandler handler =
+				new HttpRequestExecutingMessageHandler("https://www.springsource.org/spring-integration");
+		handler.setRequestFactory(requestFactory);
+		handler.setHttpMethod(HttpMethod.GET);
+		handler.setExpectedResponseType(String.class);
+		handler.defaultStatusHandler(HttpStatusCode::is4xxClientError,
+				(request, response) -> handledStatus.set(response.getStatusCode()));
+		setBeanFactory(handler);
+		handler.afterPropertiesSet();
+		handler.setOutputChannel(new QueueChannel());
+
+		handler.handleMessage(new GenericMessage<>("request"));
+
+		assertThat(handledStatus.get())
+				.isEqualTo(HttpStatus.NOT_FOUND);
+
+		handledStatus.set(null);
+
+		clientRequest.setResponse(new MockClientHttpResponse(new byte[0], HttpStatus.INTERNAL_SERVER_ERROR));
+
+		assertThatExceptionOfType(MessageHandlingException.class)
+				.isThrownBy(() -> handler.handleMessage(new GenericMessage<>("request")))
+				.withCauseInstanceOf(RestClientException.class);
+
+		assertThat(handledStatus.get())
+				.isNull();
+	}
+
+	@Test
 	public void testOutboundChannelAdapterWithinChain() {
 		ConfigurableApplicationContext ctx = new ClassPathXmlApplicationContext(
 				"HttpOutboundWithinChainTests-context.xml", this.getClass());
 		MessageChannel channel = ctx.getBean("httpOutboundChannelAdapterWithinChain", MessageChannel.class);
-		MockRestTemplate2 restTemplate = ctx.getBean("restTemplate", MockRestTemplate2.class);
+		CapturingRequestFactory requestFactory = ctx.getBean("requestFactory", CapturingRequestFactory.class);
 		channel.send(MessageBuilder.withPayload("test").build());
 
-		assertThat(restTemplate.actualUrl.get()).isEqualTo("http://localhost/test1/%2f");
+		assertThat(requestFactory.actualUrl.get()).hasToString("http://localhost/test1/%2f");
 
 		HttpRequestExecutingMessageHandler handler = ctx.getBean("chain$child.adapter.handler",
 				HttpRequestExecutingMessageHandler.class);
@@ -739,25 +760,28 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 		ConfigurableApplicationContext ctx = new ClassPathXmlApplicationContext(
 				"HttpOutboundWithinChainTests-context.xml", this.getClass());
 		MessageChannel channel = ctx.getBean("httpOutboundGatewayWithinChain", MessageChannel.class);
-		MockRestTemplate2 restTemplate = ctx.getBean("restTemplate", MockRestTemplate2.class);
+		CapturingRequestFactory requestFactory = ctx.getBean("requestFactory", CapturingRequestFactory.class);
 		channel.send(MessageBuilder.withPayload("test").build());
 
 		PollableChannel output = ctx.getBean("replyChannel", PollableChannel.class);
 		Message<?> receive = output.receive();
 		assertThat(((ResponseEntity<?>) receive.getPayload()).getStatusCode()).isEqualTo(HttpStatus.OK);
 
-		assertThat(restTemplate.actualUrl.get())
-				.isEqualTo("http://localhost:51235/%2f/testApps?param=http+Outbound+Gateway+Within+Chain");
+		assertThat(requestFactory.actualUrl.get())
+				.hasToString("http://localhost:51235/%2f/testApps?param=http+Outbound+Gateway+Within+Chain");
 
 		ctx.close();
 	}
 
 	@Test
-	@SuppressWarnings("removal")
 	public void testUriExpression() {
-		MockRestTemplate restTemplate = new MockRestTemplate();
+		AtomicReference<URI> actualUri = new AtomicReference<>();
 		HttpRequestExecutingMessageHandler handler = new HttpRequestExecutingMessageHandler(
-				new SpelExpressionParser().parseExpression("headers['foo']"), restTemplate);
+				new SpelExpressionParser().parseExpression("headers['foo']"));
+		handler.setRequestFactory((uri, httpMethod) -> {
+			actualUri.set(uri);
+			throw new RuntimeException("intentional");
+		});
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
 		String theURL = "https://bar/baz?foo#bar";
@@ -766,7 +790,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 		assertThatException()
 				.isThrownBy(() -> handler.handleMessage(message));
 
-		assertThat(restTemplate.actualUrl.get()).isEqualTo(theURL);
+		assertThat(actualUri.get()).hasToString(theURL);
 	}
 
 	@Test
@@ -840,7 +864,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 		handler.setExpectedResponseType(Foo.class);
 
 		List<HttpMessageConverter<?>> converters = new ArrayList<>();
-		converters.add(new SerializingHttpMessageConverter());
+		converters.add(new SerializingHttpMessageConverter(Foo.class.getName()));
 		handler.setMessageConverters(converters);
 
 		HttpHeaders requestHeaders = setUpMocksToCaptureSentHeaders(handler);
@@ -866,7 +890,7 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 		handler.setExpectedResponseType(GenericMessage.class);
 
 		List<HttpMessageConverter<?>> converters = new ArrayList<>();
-		converters.add(new SerializingHttpMessageConverter());
+		converters.add(new SerializingHttpMessageConverter("org.springframework.messaging.*", "java.util.*"));
 		handler.setMessageConverters(converters);
 
 		HttpHeaders requestHeaders = setUpMocksToCaptureSentHeaders(handler);
@@ -883,31 +907,21 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 	}
 
 	@Test
-	@SuppressWarnings("removal")
 	public void testNoContentTypeAndSmartConverter() {
 		Sinks.One<HttpHeaders> httpHeadersSink = Sinks.one();
-		RestTemplate testRestTemplate = new RestTemplate() {
-
-			protected <T> T doExecute(URI url, String uriTemplate, HttpMethod method,
-					RequestCallback requestCallback, ResponseExtractor<T> responseExtractor)
-					throws RestClientException {
-
-				try {
-					ClientHttpRequest request = createRequest(url, method);
-					requestCallback.doWithRequest(request);
-					httpHeadersSink.tryEmitValue(request.getHeaders());
-				}
-				catch (IOException e) {
-					throw new RestClientException("Not possible", e);
-				}
-				throw new RuntimeException("intentional");
-			}
-
-		};
 
 		HttpRequestExecutingMessageHandler handler =
-				new HttpRequestExecutingMessageHandler("https://www.springsource.org/spring-integration",
-						testRestTemplate);
+				new HttpRequestExecutingMessageHandler("https://www.springsource.org/spring-integration");
+		handler.setRequestFactory((uri, httpMethod) ->
+				new MockClientHttpRequest(httpMethod, uri) {
+
+					@Override
+					protected ClientHttpResponse executeInternal() {
+						httpHeadersSink.tryEmitValue(getHeaders());
+						throw new RuntimeException("intentional");
+					}
+
+				});
 		setBeanFactory(handler);
 		handler.afterPropertiesSet();
 
@@ -924,15 +938,6 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 
 	private static void setBeanFactory(HttpRequestExecutingMessageHandler handler) {
 		handler.setBeanFactory(TEST_INTEGRATION_CONTEXT);
-	}
-
-	private static void setRestTemplateForTesting(HttpRequestExecutingMessageHandler handler,
-			RestTemplate restTemplate) {
-
-		DirectFieldAccessor accessor = new DirectFieldAccessor(handler);
-		accessor.setPropertyValue("localRestClientBuilder", null);
-		accessor.setPropertyValue("restClient", null);
-		accessor.setPropertyValue("restTemplate", restTemplate);
 	}
 
 	private static HttpHeaders setUpMocksToCaptureSentHeaders(HttpRequestExecutingMessageHandler handler)
@@ -970,46 +975,50 @@ public class HttpRequestExecutingMessageHandlerTests implements TestApplicationC
 
 	}
 
-	private static class MockRestTemplate extends RestTemplate {
+	private static final class CapturingRestClient {
 
-		private final AtomicReference<HttpEntity<?>> lastRequestEntity = new AtomicReference<>();
+		private final HttpHeaders headers = new HttpHeaders();
 
-		private final AtomicReference<String> actualUrl = new AtomicReference<>();
+		private final AtomicReference<Object> body = new AtomicReference<>();
 
-		protected <T> T doExecute(URI url, String uriTemplate, HttpMethod method,
-				RequestCallback requestCallback, ResponseExtractor<T> responseExtractor)
-				throws RestClientException {
+		private RestClient client() {
+			RestClient restClient = mock(RestClient.class);
+			RestClient.RequestBodyUriSpec spec = mock(RestClient.RequestBodyUriSpec.class);
 
-			this.actualUrl.set(url.toString());
-			this.lastRequestEntity.set(TestUtils.getPropertyValue(requestCallback, "requestEntity"));
-			throw new RuntimeException("intentional");
+			when(restClient.method(any())).thenReturn(spec);
+			when(spec.uri(any(URI.class))).thenReturn(spec);
+			when(spec.uri(anyString(), anyMap())).thenReturn(spec);
+			when(spec.headers(any())).thenAnswer(invocation -> {
+				this.headers.clear();
+				this.body.set(null);
+				Consumer<HttpHeaders> headerConsumer = invocation.getArgument(0);
+				headerConsumer.accept(this.headers);
+				return spec;
+			});
+			when(spec.body(any(Object.class))).thenAnswer(invocation -> {
+				this.body.set(invocation.getArgument(0));
+				return spec;
+			});
+			when(spec.retrieve()).thenThrow(new RuntimeException("intentional"));
+			return restClient;
+		}
+
+		private HttpEntity<?> lastRequestEntity() {
+			return new HttpEntity<>(this.body.get(), this.headers);
 		}
 
 	}
 
-	@SuppressWarnings("unused")
-	private static class MockRestTemplate2 extends RestTemplate {
+	public static final class CapturingRequestFactory implements ClientHttpRequestFactory {
 
-		private final AtomicReference<String> actualUrl = new AtomicReference<>();
+		public final AtomicReference<URI> actualUrl = new AtomicReference<>();
 
-		MockRestTemplate2() {
-			DefaultUriBuilderFactory uriBuilderFactory = new DefaultUriBuilderFactory();
-			uriBuilderFactory.setEncodingMode(DefaultUriBuilderFactory.EncodingMode.NONE);
-			setUriTemplateHandler(uriBuilderFactory);
-		}
-
-		protected <T> T doExecute(URI url, String uriTemplate, HttpMethod method,
-				RequestCallback requestCallback, ResponseExtractor<T> responseExtractor)
-				throws RestClientException {
-
-			this.actualUrl.set(url.toString());
-			try {
-				return responseExtractor.extractData(new MockClientHttpResponse(new byte[0], HttpStatus.OK));
-			}
-			catch (IOException ex) {
-				throw new ResourceAccessException("I/O error on " + method.name() +
-						" request for \"" + url + "\": " + ex.getMessage(), ex);
-			}
+		@Override
+		public ClientHttpRequest createRequest(URI uri, HttpMethod httpMethod) {
+			this.actualUrl.set(uri);
+			MockClientHttpRequest request = new MockClientHttpRequest(httpMethod, uri);
+			request.setResponse(new MockClientHttpResponse(new byte[0], HttpStatus.OK));
+			return request;
 		}
 
 	}

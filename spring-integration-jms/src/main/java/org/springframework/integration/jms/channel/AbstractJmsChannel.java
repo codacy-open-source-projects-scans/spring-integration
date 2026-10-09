@@ -22,7 +22,9 @@ import org.springframework.integration.IntegrationMessageHeaderAccessor;
 import org.springframework.integration.channel.AbstractMessageChannel;
 import org.springframework.integration.jms.DefaultJmsHeaderMapper;
 import org.springframework.integration.jms.DynamicJmsTemplateProperties;
+import org.springframework.integration.jms.JmsHeaderMapper;
 import org.springframework.jms.core.JmsTemplate;
+import org.springframework.jms.support.converter.MessageConversionException;
 import org.springframework.jms.support.converter.MessageConverter;
 import org.springframework.jms.support.converter.MessagingMessageConverter;
 import org.springframework.messaging.Message;
@@ -36,6 +38,7 @@ import org.springframework.util.Assert;
  * @author Mark Fisher
  * @author Gary Russell
  * @author Artem Bilan
+ * @author Glenn Renfro
  *
  * @since 7.0
  *
@@ -44,13 +47,31 @@ import org.springframework.util.Assert;
  */
 public abstract class AbstractJmsChannel extends AbstractMessageChannel {
 
-	protected final DefaultJmsHeaderMapper headerMapper = new DefaultJmsHeaderMapper();
+	private JmsHeaderMapper headerMapper = new DefaultJmsHeaderMapper();
 
 	protected final JmsTemplate jmsTemplate;
 
 	public AbstractJmsChannel(JmsTemplate jmsTemplate) {
 		Assert.notNull(jmsTemplate, "jmsTemplate must not be null");
 		this.jmsTemplate = jmsTemplate;
+	}
+
+	/**
+	 * Set the mapper for the channel.
+	 * @param headerMapper the {@link JmsHeaderMapper} to use
+	 * @since 5.5.22
+	 */
+	public void setHeaderMapper(JmsHeaderMapper headerMapper) {
+		this.headerMapper = headerMapper;
+	}
+
+	/**
+	 * Get the mapper for the channel.
+	 * @return headerMapper
+	 * @since 5.5.22
+	 */
+	protected JmsHeaderMapper getHeaderMapper() {
+		return this.headerMapper;
 	}
 
 	@Override
@@ -73,10 +94,18 @@ public abstract class AbstractJmsChannel extends AbstractMessageChannel {
 		return true;
 	}
 
+	/**
+	 * Convert {@link jakarta.jms.Message} to a Spring {@link Message}.
+	 * @return Spring {@link Message}
+	 * @throws MessageConversionException if the converter returns {@code null}.
+	 */
 	protected Message<?> fromJmsMessage(jakarta.jms.Message message) {
 		MessageConverter converter = this.jmsTemplate.getMessageConverter();
 		try {
 			Object converted = converter.fromMessage(message);
+			if (converted == null) {
+				throw new MessageConversionException("Message converter returned null for: " + message);
+			}
 			Message<?> messageToSend;
 			if (converted instanceof Message<?> convertedMessage) {
 				messageToSend = convertedMessage;

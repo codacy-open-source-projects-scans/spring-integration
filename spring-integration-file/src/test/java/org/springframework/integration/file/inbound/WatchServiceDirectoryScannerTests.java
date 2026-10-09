@@ -99,8 +99,12 @@ public class WatchServiceDirectoryScannerTests implements TestApplicationContext
 
 					@Override
 					public boolean remove(File fileToRemove) {
-						removeFileLatch.countDown();
-						return super.remove(fileToRemove);
+						try {
+							return super.remove(fileToRemove);
+						}
+						finally {
+							removeFileLatch.countDown();
+						}
 					}
 
 				};
@@ -203,7 +207,7 @@ public class WatchServiceDirectoryScannerTests implements TestApplicationContext
 
 		assertThat(removeFileLatch.await(10, TimeUnit.SECONDS)).isTrue();
 
-		File baz3 = File.createTempFile("baz3", ".txt", baz);
+		File baz3 = File.createTempFile("baz3", ".txt", baz).getCanonicalFile();
 
 		n = 0;
 		Message<File> fileMessage = null;

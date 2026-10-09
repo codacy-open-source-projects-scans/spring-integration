@@ -16,11 +16,16 @@
 
 package org.springframework.integration.file.filters;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Queue;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Test;
 
@@ -79,6 +84,26 @@ public class AcceptOnceFileListFilterTests {
 		AcceptOnceFileListFilter<String> filter = new AcceptOnceFileListFilter<>();
 		CompositeFileListFilter<String> composite = new CompositeFileListFilter<>(Collections.singletonList(filter));
 		doTestRollback(composite);
+	}
+
+	@Test
+	void testConcurrentAcceptAndRemoveDoesNotCorruptSeenSet() {
+		AcceptOnceFileListFilter<String> filter = new AcceptOnceFileListFilter<>();
+		int fileCount = 5000;
+		ExecutorService executorService = Executors.newFixedThreadPool(4);
+		try {
+			List<CompletableFuture<Void>> futures = new ArrayList<>(fileCount * 2);
+			for (int i = 0; i < fileCount; i++) {
+				String file = "file" + i;
+				futures.add(CompletableFuture.runAsync(() -> filter.accept(file), executorService));
+				futures.add(CompletableFuture.runAsync(() -> filter.remove(file), executorService));
+			}
+			assertThat(CompletableFuture.allOf(futures.toArray(CompletableFuture[]::new)))
+					.succeedsWithin(30, TimeUnit.SECONDS);
+		}
+		finally {
+			executorService.shutdownNow();
+		}
 	}
 
 	protected void doTestRollback(ReversibleFileListFilter<String> filter) {

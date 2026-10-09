@@ -18,6 +18,7 @@ package org.springframework.integration.file.inbound;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.FileSystems;
 import java.nio.file.FileVisitResult;
 import java.nio.file.FileVisitor;
@@ -101,6 +102,7 @@ import org.springframework.util.Assert;
  * @author Artem Bilan
  * @author Steven Pearce
  * @author Patryk Ziobron
+ * @author Rene Choi
  *
  * @since 7.0
  */
@@ -332,27 +334,37 @@ public class FileReadingMessageSource extends AbstractMessageSource<File> implem
 
 	@Override
 	public void start() {
-		if (!this.running.getAndSet(true)) {
-			if (this.directoryExpression instanceof ValueExpression) {
-				File directoryToCreate = this.directoryExpression.getValue(File.class);
-				if (directoryToCreate == null ||
-						(!directoryToCreate.exists() && this.autoCreateDirectory && !directoryToCreate.mkdirs())) {
+		if (this.running.compareAndSet(false, true)) {
+			try {
+				doStart();
+			}
+			catch (RuntimeException ex) {
+				this.running.set(false);
+				throw ex;
+			}
+		}
+	}
 
-					throw new IllegalStateException("Cannot create directory or its parents: " + directoryToCreate);
-				}
-				Assert.isTrue(directoryToCreate.exists(),
-						() -> "Source directory [" + directoryToCreate + "] does not exist.");
-				Assert.isTrue(directoryToCreate.isDirectory(),
-						() -> "Source path [" + directoryToCreate + "] does not point to a directory.");
-				Assert.isTrue(directoryToCreate.canRead(),
-						() -> "Source directory [" + directoryToCreate + "] is not readable.");
-				if (this.scanner instanceof WatchServiceDirectoryScanner watchServiceDirectoryScanner) {
-					watchServiceDirectoryScanner.directory = directoryToCreate;
-				}
+	private void doStart() {
+		if (this.directoryExpression instanceof ValueExpression) {
+			File directoryToCreate = this.directoryExpression.getValue(File.class);
+			if (directoryToCreate == null ||
+					(!directoryToCreate.exists() && this.autoCreateDirectory && !directoryToCreate.mkdirs())) {
+
+				throw new IllegalStateException("Cannot create directory or its parents: " + directoryToCreate);
 			}
-			if (this.scanner instanceof Lifecycle lifecycle) {
-				lifecycle.start();
+			Assert.isTrue(directoryToCreate.exists(),
+					() -> "Source directory [" + directoryToCreate + "] does not exist.");
+			Assert.isTrue(directoryToCreate.isDirectory(),
+					() -> "Source path [" + directoryToCreate + "] does not point to a directory.");
+			Assert.isTrue(directoryToCreate.canRead(),
+					() -> "Source directory [" + directoryToCreate + "] is not readable.");
+			if (this.scanner instanceof WatchServiceDirectoryScanner watchServiceDirectoryScanner) {
+				watchServiceDirectoryScanner.directory = directoryToCreate;
 			}
+		}
+		if (this.scanner instanceof Lifecycle lifecycle) {
+			lifecycle.start();
 		}
 	}
 
@@ -397,7 +409,12 @@ public class FileReadingMessageSource extends AbstractMessageSource<File> implem
 	protected @Nullable AbstractIntegrationMessageBuilder<File> doReceive() {
 		// rescan only if needed or explicitly configured
 		if (this.scanEachPoll || this.toBeReceived.isEmpty()) {
-			scanInputDirectory();
+			try {
+				scanInputDirectory();
+			}
+			catch (IOException ex) {
+				throw new UncheckedIOException(ex);
+			}
 		}
 
 		DirFile dirFile = this.toBeReceived.poll();
@@ -418,9 +435,10 @@ public class FileReadingMessageSource extends AbstractMessageSource<File> implem
 		return null;
 	}
 
-	private void scanInputDirectory() {
+	private void scanInputDirectory() throws IOException {
 		File directory = this.directoryExpression.getValue(getEvaluationContext(), File.class);
 		Assert.notNull(directory, "'directoryExpression' must not evaluate to null");
+		directory = directory.getCanonicalFile();
 		if (this.scanner instanceof WatchServiceDirectoryScanner watchServiceDirectoryScanner) {
 			if (!watchServiceDirectoryScanner.directory.equals(directory)) {
 				watchServiceDirectoryScanner.stop();
@@ -431,7 +449,7 @@ public class FileReadingMessageSource extends AbstractMessageSource<File> implem
 		List<File> filteredFiles = this.scanner.listFiles(directory);
 
 		for (File file : filteredFiles) {
-			this.toBeReceived.add(new DirFile(file, directory));
+			this.toBeReceived.add(new DirFile(file.getCanonicalFile(), directory));
 		}
 
 		if (!filteredFiles.isEmpty()) {
